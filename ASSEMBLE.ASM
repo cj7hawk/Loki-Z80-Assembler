@@ -468,10 +468,10 @@ PASS1_SAMELINE:
 LD	E,$FF
 LD	C,Direct_Console_IO
 CALL	BDOS
-;CP	$03
-;JP	Z,CTRL_C								; Break point. Once per pass.
-OR		A
-CALL	NZ,KEYPRESS
+CP	$03
+JP	Z,CTRL_C								; Break point. Once per pass.
+;OR		A
+;CALL	NZ,KEYPRESS
 
 IFNZ	DEBUG
 CALL	CRLF
