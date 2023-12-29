@@ -61,12 +61,17 @@ OPEN_ASSEMBLY:
 				LD		(LABEL_TABLE),HL	; Clear Label table just this once... And since HL is alrady 0000 for the next opcode... 
 				ADD		HL,SP			; Move the SP location to HL.
 				LD		(STACK_SAVE),HL	; Store the stack location at present.
+		
+				LD		HL,LABEL_TABLE
+				LD		(LABEL_LAST),HL	; Just in case we lead with a Macro or something else that uses the label table, make sure we know where it starts. 
 
-
+				CALL	SWITCHES		; Examine Switches	
+				CALL	INTEL_SETBUFFER	; Set up the Intel hex format buffer.
+				
 				LD		DE,WELCOME_MESSAGE
 				CALL	PRINTSTRING
 				
-				LD		HL,$006C		; Second filename in default FCB.
+				LD		HL,$006C		; Second filename in default FCB.		; Open the destination before opening the source. 
 				LD		DE,OUTPUT_FCB	; Move to the Output FCB
 				LD		BC,$10			; Filename and Drive number. 
 				LDIR				
@@ -75,8 +80,7 @@ OPEN_ASSEMBLY:
 				CALL	INIT_VARS
 				CALL	OPEN_SOURCE		; Open the source code file - And read the first sector. 
 
-				CALL	OUTPUT_RESET	; Reset(SET) the counters for the output file. 
-				CALL	SWITCHES		; Examine Switches				
+				CALL	OUTPUT_RESET	; Reset(SET) the counters for the output file. 			
 
 				CALL	PASS1			; Build table of labels. 
 
@@ -89,6 +93,10 @@ OPEN_ASSEMBLY:
 				CALL	OPEN_SOURCE				
 				CALL	PASS2	
 
+				LD		A,(INTELFORMAT)
+				OR		A
+				CALL	NZ,INTEL_EOF		; If we're in intel format, then we want to write whatever is in the buffer before we're done since there might be something in the buffer. 
+				
 				CALL	CLOSE_DEST
 
 				LD		DE,NOERRORS
@@ -156,6 +164,8 @@ WRITE_DEST:
 				RET
 
 CLOSE_DEST:
+				LD		A,'@'					; Ctrl-Z for EOF. 
+				CALL	BYTE_TO_FILE			; Write EOF - or a standin for the moment. 
 				LD		A,(OUTPUT_COUNT)
 				OR		A
 				JR		Z,CLOSE_DEST_NOWRITE	; No need to close the file. We already saved with the last Write Dest.
@@ -163,10 +173,17 @@ CLOSE_DEST:
 CLOSE_DEST_NOWRITE:
 				LD		DE,OUTPUT_FCB
 				LD		C,Close_File
-
- CALL	BDOS
-
+				CALL	BDOS
+				
 				RET
+
+HEX_TO_FILE:							; Like Byte to File but writes HEX codes. 
+		LD		(PRINTHEXCHAR),A		; Load up the byte to change. Reuse PRINTHEX routines here. 
+		CALL	HEXCONV					; Convert the first nibble and return in A.
+		CALL	BYTE_TO_FILE			; Write to the file
+		CALL	HEXCONV					; Second nibble
+		CALL	BYTE_TO_FILE			; Write to the file
+		RET
 
 BYTE_TO_FILE:								;Sequential Byte by Byte.
 				LD		HL,(OUTPUT_PTR)
@@ -276,13 +293,13 @@ SWITCH_TEST:	INC		HL
 				JR		Z,SWITCH_NODECB		; If it's already going to time out, don't make it go to 256.
 				DEC		B
 SWITCH_NODECB:	LD		A,(HL)	
-				CP		'D'					; 
-				JR		Z,DEBUG_ON
+				CP		'H'					; 
+				JR		Z,HEX_ON
 				RET
 				
-DEBUG_ON:
-;				LD		A,$FF
-;				LD		(DEBUG),A
+HEX_ON:
+				LD		A,$FF
+				LD		(INTELFORMAT),A
 				RET
 
 ;################ A lot of standard errors below. Anything to ERROR_OUT will dump the stack, restore pre-run
@@ -349,7 +366,7 @@ CALL SHOW_STATS
 LD HL,OUTPUT_FCB
 LD DE,OUTPUT_BUFFER+127
 LD BC,$AA55
-HALT				
+;HALT				
 				RET								; And just return out... 
 
 
@@ -389,9 +406,23 @@ OPCODES:			DW		$0000			; How many opcodes did we write?
 CONDITIONAL:		DB		$00				; While this is $00, process instructions. Don't change this until we get the directive IFEND							
 
 IN_MACRO:			DB		$00				; Flag - When I'm in a MACRO, this should be non-zero. It 
+MACRO_COUNT:		DB		$00				; Macro can be up to 256 bytes... More than this shouldn't really be a macro since Macro's should be relative - eg, JR not JP. 
 
-OUTPUT_PTR:		DW		$0000
-OUTPUT_COUNT:	DB		$0000
+; Macro data format - 
+; dw $0000 	- Vector to next label.
+; db $00	- Number of characters in label name
+; db n,n,n,n.... (charcters of label)
+; dw $0000 	- Number of characters in macro. USUALLY less than 256 bytes.
+; db n,n,n,n.... (bytes of assembled macro)
+; Next label vactor. 
+
+
+CSUM:			DB		$00			; Byte for summing intel hex format output.
+HEXCOUNT:		DB		$00			; How many bytes should we install per line? ( We will begin with the PC whatever it is. )
+INTELFORMAT:	DB		$00			; If not zero, output in INTEL FORMAT
+
+OUTPUT_PTR:		DW		$0000		; File Pointer - Where in the output buffer are we writing to?
+OUTPUT_COUNT:	DB		$0000		; Output Count - How many bytes have we written to the output buffer? 
 
 
 
@@ -465,15 +496,15 @@ PASS_LOOP:
 				
 PASS1_SAMELINE:
 
-LD	E,$FF
-LD	C,Direct_Console_IO
-CALL	BDOS
-CP	$03
-JP	Z,CTRL_C								; Break point. Once per pass.
-;OR		A
-;CALL	NZ,KEYPRESS
+		LD	E,$FF				; Read the keyboard once per pass in case of CTRL C or in debug mode, PAUSE. 
+		LD	C,Direct_Console_IO
+		CALL	BDOS
+		CP	$03
+		JP	Z,CTRL_C								; Break point. Once per pass.
 
 IFNZ	DEBUG
+OR		A
+CALL	NZ,KEYPRESS
 CALL	CRLF
 CALL 	PRINTLINE							;Print the line number
 ENDIF
@@ -747,8 +778,25 @@ TEST_MACRO:
 		LD		DE,MACRO
 		CALL	TESTLOOP
 		RET		NZ
+		
+		CALL	GETWORD_TO_END			; Get the next label... 
+		CALL	MATCH_LABEL				; This sets us up at the end of the tree or returns an existing location.
+
+;		JR		C,MACROFAIL				; It is not acceptable to hit a macro label already...Match_Label should have located the end of the table.
+		CALL	ADD_LABEL_REENTRY		; Call the remaining add-label routine to add the label.
+										; HL=Start of label (vector to next label)
+										; DE=Previous next label - Macro start.
+		LD		A,$FF
+		LD		(IN-MACRO),A			; turn on Macro mode.  We will now write the label. 
+										
+
+
 
 		RET
+		
+MACROFAIL:
+		LD		DE,ERR_MACRO
+		JP		ERROR_OUT
 
 TEST_MEND:
 		LD		DE,MEND
@@ -2676,7 +2724,7 @@ MATCH_LABEL:		; Before we add a label, or when searching for a value, we must se
 					; see if the label exists. This also locates the next label location.
 		LD		HL,LABEL_TABLE			; Initial label table location.
 MATCH_LABEL_LOOP:
-		PUSH	HL						; Store the current vector on the stack. 
+		PUSH	HL						; Store the current vector on the stack. We can retrieve it without backing it out. 
 
 		LD		A,(HL)
 		INC		HL
@@ -2748,20 +2796,19 @@ LABEL_ALREADY_EXIST:
 		
 LABEL_LAST: DW $0000
 
-LABEL_OVERFLOW_MSG:	DB	$0D,$0A,'Label memory exhausted. Out of memory.$'
-
 LABEL_OVERFLOW:
-		LD		DE,LABEL_OVERFLOW_MSG
+		LD		DE,ERR_LABEL_OVERFLOW
 		JP		ERROR_OUT
 
 LABEL_POS:	DW	LABEL_TABLE					; Where are we in the label table?
-.EQU	LABEL_TOP,$C000						; Generate label overflow error if Label Pos goes above Label Top.
+.EQU	LABEL_TOP,$DF00						; Generate label overflow error if Label Pos goes above Label Top.
 ADD_LABEL:
 		CALL	MATCH_LABEL				; This sets us up at the end of the tree or returns an existing location.
 
 		JR		C,LABEL_EXISTS			; OK, we found the label already existed. Do we update it's value? Do we check it's value?
 		
-		
+
+ADD_LABEL_REENTRY:						; MACRO's reuse this code, but can't work with pre-existing labels since they use the space beyond the value. 		
 		LD		A,(PASS)
 		CP		$02
 		JP		Z,LABEL_NOT_EXIST		;  ALL labels should exit by Pass 2, so don't add new ones... ERROR ERROR ERROR!
@@ -2769,10 +2816,10 @@ ADD_LABEL:
 										; So we write the entry into the table. 
 										; Match label routine should return with HL = Location of next empty label.
 		EX		DE,HL					; Move the location of the label to DE, and HL with Memory Top. 
-;		LD		HL,LABEL_TOP			; The highest memory address of a label. 
-;		OR		A
-;		SBC		HL,DE					; Check overflow of label. 
-;		JR		C,LABEL_OVERFLOW		; Label memory exhausted. Test this later.
+		LD		HL,LABEL_TOP			; The highest memory address of a label. 
+		OR		A
+		SBC		HL,DE					; Check overflow of label. 
+		JR		C,LABEL_OVERFLOW		; Label memory exhausted. Test this later.
 
 		LD		HL,BUFFER				; used to start with buffer +1 but we also use the character count now. 
 		
@@ -2808,11 +2855,13 @@ ADD_LABEL:
 		LD		(HL),E
 		INC		HL
 		LD		(HL),D					; And store the vector to the location held in DE. 
-										; Leave DE the same in case we need to add a value later. We can dec twice
+		DEC		HL								; Leave DE the same in case we need to add a value later. We can dec twice
 										; then write the value. 
 
 		RET								; And the label has been added to the end of the list
 										; and the list updated. We can exit here. 
+										; On exit, HL holds the vector to the next label and DE holds the location past the end of the label, normally the next label start. 
+										; Might also be the start of the Macro if the label is a macro... 
 										
 										; Exceptions next. 
 		
@@ -2821,14 +2870,8 @@ LABEL_EXISTS:							; OK, we found the label.. Update if it's zero. If it's not,
 										; In pass 1, this is an instant fail - a label should only be assigned once. 
 										; Or do I want to change that?
 		JP		LABEL_ALREADY_EXIST		; Oops... Just assume if we get here, it's a mistake. This is ONLY called by LABEL: type labels. NOT EQU type labels assignments.  
-;		LD		A,(PASS)
-;		CP		$01
-;		JP		Z,LABEL_ALREADY_EXIST	; Trap attempt to reassign label. 
-;RST 20
-;		CALL	SET_LABEL				; DE should hold the location of the label
-;RST 28
-;		ret	
-;
+
+
 ;SET_LABEL:								;Set the value of a pre-existing label once Match_Label as located it. Right now VALUE holds the previous value. 
 ;		PUSH	DE						; Store the label value location. It's in DE presently. 
 ;		CALL	GETWORD_TO_END
@@ -3538,6 +3581,8 @@ ERR_IMODE:				DB	'Invalid IM$'
 ERR_BREAK:				DB	'Break Detected$'
 ERR_LABEL_NOT_EXIST:	DB	'Label does not exist$'
 ERR_LABEL_ALREADY_EXIST: DB 'Label reassignment attempted$'
+ERR_MACRO:				DB	'Macro name already in use$'
+ERR_LABEL_OVERFLOW:		DB	$0D,$0A,'Out Of Memory$'
 NOERRORS:				DB	$0D,$0A,'NO errors encountered. Assembly Completed.$'
 		
 
@@ -3553,25 +3598,23 @@ PRINTHEX16:
 		LD		A,L					; And fall through
 		
 PRINTHEX:							; Print a HEX number in A
-		LD		(PRINTHEXCHAR),A
-		LD		HL,PRINTHEXCHAR
+		LD		(PRINTHEXCHAR),A		; Load up the byte to change. 
+		CALL	HEXCONV					; Convert the first nibble and return in A.
+		CALL	PRINTCHAR
+		CALL	HEXCONV
+		CALL	PRINTCHAR
+		RET
+
+		
+HEXCONV:
+		LD		HL,PRINTHEXCHAR			; Where we stored the byte to convert.
 		RLD								; Move the upper nibble of the byte into A
 		AND		$0F						; Mask to 4 bits
 		OR		$30						; Convert to a number.
 		CP		$3A						; See if we need to add 7. 
-		JR		C,		PRINTHEX1
+		JR		C,		HEXCONV1
 		ADD		A,$07
-PRINTHEX1:
-		CALL 	PRINTCHAR
-		LD		HL,PRINTHEXCHAR		
-		RLD								; Now rotate the lower 4 back to A. 
-		AND		$0F						; And repeat as above. 
-		OR		$30
-		CP		$3A
-		JR		C,		PRINTHEX2
-		ADD		A,$07
-PRINTHEX2:
-		CALL 	PRINTCHAR
+HEXCONV1:
 		RET
 	
 PRINTCHAR:							; We can redirect here if necessary...  BDOS character output. 
@@ -4108,14 +4151,19 @@ EVAL_LABEL_OK:						; We come here if it's OK also.
 
 ;;;;; Write Bytes - To a file, an output, a label or other destination.
 
-WRITEBYTE_STORE:	DB	$00				; Temp store for the byte we're writing.
+
+; Local Variables. 
+EQU INTELRECORDLEN,$10					; How long should the record length be for Intel Hex File Output ($10 = 16 bytes per line, plus record marker,header, checksum are extra )		
+LAST_ADDRESS:	DW	$0000				; Last address - If we go up by more than 1, we need to close the current output and start a new line.  Means ORG has changed. 		
+WRITE_BYTE_STORE:	DB	$00				; Temp store for the byte we're writing.
+WRITE_ADDR_STORE:	DW	$0000			; Temp store for the location we want to write to.
 
 WRITEBYTE:
 		LD		HL,(PC)
 		LD		DE,(PC_OFFSET)			; We can write to a different location.
 		ADD		HL,DE					; ADD them.
-
-		LD		(WRITEBYTE_STORE),A		; Store the byte
+		LD		(WRITE_ADDR_STORE),HL	; Store the location we want to write to.
+		LD		(WRITE_BYTE_STORE),A		; Store the byte we want to write to that location. 
 
 ;LD	(HL),A 	  							; TEST. Don't write during Pass1 and don't write direct to memory unless switch is on. 
 
@@ -4123,8 +4171,13 @@ WRITEBYTE:
 		CP		$01
 		JR		Z,DRY_WRITE				; If in pass1, don't write anything. 
 
-		LD		A,(WRITEBYTE_STORE)		; Recover the byte.
-		CALL BYTE_TO_FILE				; And write to the output file. 
+		
+		LD		A,(INTELFORMAT)
+		OR		A
+		JR		NZ,INTELHEX				; If this is set, HEX format output.
+
+		LD		A,(WRITE_BYTE_STORE)		; Recover the byte.
+		CALL 	BYTE_TO_FILE				; And write to the output file. 
 
 
 DRY_WRITE:								; In case we didn't really write it.
@@ -4141,6 +4194,8 @@ ENDIF
 		INC		HL
 		LD		(OPCODES),HL
 		RET
+		
+		
 
 IFNZ DEBUG
 ; Do we want to show what we're writing? (DEBUG mode)
@@ -4157,20 +4212,125 @@ WRITEBYTE_SHOWBYTE:
 		RET
 ENDIF
 
-;WRCODE_SHOWCOMMAND:				; Just prints out the command buffer.... Not really necessary. Might use for debugging again sometime. 
-;		CALL	CRLF
-;		LD		HL,COMMAND
-;		LD		B,8
-;WRTOP:
-;		PUSH HL
-;		PUSH BC
-;		LD	A,(HL)
-;		CALL	PRINTHEX
-;		POP	BC
-;		POP HL
-;		INC HL
-;		DJNZ WRTOP
-;		RET
+
+
+; Intel Hex Format reformatter here. Stores bytes in a buffer then writes a Hex Record at a single time. 
+
+INTELHEX:								; Convert output streat to Intel Hex File Format. 
+		LD		HL,(WRITE_ADDR_STORE)
+		LD		DE,(LAST_ADDRESS)		;
+		LD		(LAST_ADDRESS),HL		; And update assuming everything is OK. Either way, this will always be the last address we checked in this routine, 
+		OR		A
+		SBC		HL,DE
+		DEC		HL						; Reduce by 1, since there should be 1 different between them.
+		LD		A,H
+		OR		L						; A must be zero or the PC has moved too far. 
+		CALL	NZ,INTEL_FLUSHBUFFER	; Means the end address changed. Flush the current buffer out to disk. 
+		
+										; Let's build the Intel Buffer. 
+
+		LD		A,(INTELSIZE)
+		CP		INTELRECORDLEN			; See if we're at the end of the buffer
+		CALL	Z,INTEL_FLUSHBUFFER		; If we're at the end, Flush the buffer out to disk before writing more.  This routine MUST return A=0 on return. 
+		
+		LD		E,A
+		LD		D,$00
+		LD		HL,INTELBUFFER
+		ADD		HL,DE					; Get the next buffer location.
+		
+		LD		A,(WRITE_BYTE_STORE)	; Get the next byte. 
+		LD		(HL),A					; Store the byte.
+
+		LD		HL,INTELSIZE			; And increment the data counter for the buffer. 
+		INC		(HL)	
+		
+		JP		DRY_WRITE				; And we're done. It cycles infinitely in a structure manner. Then returns via DRYWRITE since we write the file when it's full.
+
+
+
+INTEL_FLUSHBUFFER:
+		LD		A,(INTELSIZE)
+		OR		A
+		JR		Z,INTEL_SETBUFFER		; If there's nothing in the buffer, don't send it, just bypass it. 
+		
+		LD		A,':'					; Record marker.
+		CALL	BYTE_TO_FILE			; Send to the file.
+		
+		LD		HL,INTELSIZE			; The start of the buffer.
+		LD		A,(INTELSIZE)
+		ADD		A,4
+		LD		B,A						; The size of the full buffer without the : or CRLF and NOT the checksum. 
+INTEL_FLUSH_LOOP:
+		PUSH	HL
+		PUSH	BC
+		LD		A,(HL)
+		CALL	INTEL_ADD_CSUM			; Add the byte to the checksum.
+		CALL	HEX_TO_FILE				; Now send the character in A to the file as HEX. 
+		POP		BC
+		POP		HL
+		INC		HL
+		DJNZ	INTEL_FLUSH_LOOP		; Send all the bytes. 
+
+		LD		A,(INTELCSUM)
+		XOR		$FF
+		INC		A						; Complement+1
+		CALL	HEX_TO_FILE				; Write the Checksum to the file. 
+
+		LD		A,$0D
+		CALL	BYTE_TO_FILE			; And insert a new line.
+		LD		A,$0A
+		CALL	BYTE_TO_FILE			; And we're done writing the HEX record to the output file. 
+
+INTEL_SETBUFFER:						; And set up the buffer for a clean start. Add in the next write address, etc. 
+		LD		A,(WRITE_ADDR_STORE+1)
+		LD		(INTELPC),A				; Update the PC for the next buffer.
+		LD		A,(WRITE_ADDR_STORE)
+		LD		(INTELPC+1),A			; But reverse the order of the bytes ( BIG end first )
+
+		XOR		A						; Make sure A is zero on exit. 
+		LD		(INTELSIZE),A			; And there's nothing in the buffer yet. 
+		LD		(INTELCSUM),A			; And the checksum for the next buffer is zeroed. 
+		RET	
+		
+INTEL_ADD_CSUM:
+		PUSH	HL						; Try to not corrupt anything here.  I could probably drop the push/pop HL since we don't need it after this. 
+		PUSH	AF
+		LD		HL,INTELCSUM
+		ADD		A,(HL)
+		LD		(HL),A					; Update the checksum
+		POP		AF
+		POP		HL
+		RET
+
+INTEL_EOF:
+		CALL	INTEL_FLUSHBUFFER		; Any remaining bytes? Send them out before the EOF record, 
+		LD		A,':'
+		CALL	BYTE_TO_FILE
+		XOR		A
+		CALL	HEX_TO_FILE
+		XOR		A
+		CALL	HEX_TO_FILE
+		XOR		A
+		CALL	HEX_TO_FILE
+		LD		A,$01
+		CALL	HEX_TO_FILE
+		LD		A,$FF
+		CALL	HEX_TO_FILE
+		LD		A,$0D
+		CALL	BYTE_TO_FILE
+		LD		A,$0A
+		CALL	BYTE_TO_FILE
+		RET
+		
+; We ignore : and the New Line. We can add those manually since they are bytes, not HEX.
+INTELSIZE:		DB	$00					; Number of data bytes in record. This will change. Starts at zero. 
+INTELPC:		DW	$0000				; Initial location of PC.
+INTELTYPE:		DB	$00					; Intel data type.
+INTELBUFFER:	BLOCK	INTELRECORDLEN	; How many data bytes in record? Max number. Might be less than this.
+INTELCSUM:		DB	$00					; Checksum, Inverted, +1.		
+
+
+
 
 ;  Below we assemble the bytes from the command, add a prefix and maybe swap the displacement ( postfix ) into the second last byte. 
 WRITECODE:
@@ -4380,7 +4540,7 @@ MULTIPLY_SHIFT:
 		
 
 ; The Label Table begins with 0000 which moves along to the end as it is populated.		
-LABEL_TABLE:	DB	$00,$00,'This is the label table.'	; ' This is where the variable block starts...'
+LABEL_TABLE:	DB	$00,$00		;'This is the label table.'	; ' This is where the variable block starts...'
 
 	
 	
