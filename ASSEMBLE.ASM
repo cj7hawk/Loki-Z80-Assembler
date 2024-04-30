@@ -19,10 +19,11 @@
 ;
 ; CALL format. LASM INFILE.ASM OUTFILE.COM /A/B/C/d/e/f/g/ etc. 
 ; /D debug - Deprecated - I can recompile it to show this.
-; /H Hex format
-; /I - Ignore errors. Attempt to continue from the point we started... If necessary keep throwing up more errors.
+; /H - Output file is in Intel Hex format
+; /I - Ignore errors. Attempt to continue from the point we started... If necessary keep throwing up more errors. Not implemented yet. 
 ; /P - PRN output format ( note, uses CR without line feed to store line details. )
 ;      PRN Format LLLLL MMMM AA BB CC DD INSTRUCTIONS - Line, Memory, DATA DATA DATA Opcodes. 
+; /F - Output screen responses to ASM.TXT instead of the console. 
 ; 
 ; 
 ;
@@ -67,12 +68,11 @@ EQU	DEBUG,$00
 
 
 ;System Constants.
-.EQU	BDOS,$0005
+.EQU	BDOS0005,$0005
 .EQU	FCB1,$005C
-;.EQU	LABEL_TABLE,$2000		; I need to add something that fails if PC goes over $1FFF..... As a switch. 
 
 ;Configuration Constants.
-.EQU	BUFFERSIZE,250			; Note what the buffer size is. 256 bytes in this case. Can be strings, Equations or anything.  Make it 250 to allow for extra bytes in a label, so label<256 bytes. 
+.EQU	BUFFERSIZE,120			; Note what the buffer size is. 256 bytes in this case. Can be strings, Equations or anything.  Make it 250 to allow for extra bytes in a label, so label<128 bytes. 
 								; Does not include comments ( anything following a ; ) or whitespace ( ALL characters below $20 )
 								; If longer than 251 bytes, only affects macros if the name is larger than this... No one should ever make a macro that long. 
 
@@ -103,8 +103,9 @@ OPEN_ASSEMBLY:
 				LD		SP,HL			; Set the SP to two bytes below the BDOS. 
 			
 
+				LD		HL,LABEL_TABLE
+				LD		(LABEL_BASE),HL	; Store the current base of the label table start post-system labels, for the current module.  Set to first label in memory. 			
 				LD		HL,LABEL_TABLE_USER	; This is where the user labels start, and we begin with the root level modules. 
-;				LD		(LABEL_BASE),HL	; Store the current base of the label table start post-system labels, for the current module. Already defined by file. 
 				LD		(LABEL_LAST),HL	; Just in case we lead with a Macro or something else that uses the label table, make sure we know where it starts. 
 
 				CALL	SWITCHES		; Examine Switches	
@@ -150,6 +151,14 @@ OPEN_ASSEMBLY:
 				
 				JP		NO_ERROR_OUT	; Restore the stack and exit. 
 
+
+BDOS:				; BDOS intercept to allow operation on other platforms. 
+	PUSH	HL
+	PUSH	BC
+	CALL	BDOS0005	
+	POP		BC
+	POP		HL
+	RET
 
 ONE_MORE_TIME:	DW	$00					; While 00 then just 1 pass. If it's zero or one, doesn't matter. 				
 MAKE_2_PASSES:
@@ -220,6 +229,10 @@ OPEN_SOURCE:
 				RET
 				
 OPEN_DEST:
+				LD		A,(DRY)
+				OR		A
+				RET		NZ				; If it's a dry write, don't even open the output file... 
+				
 				LD      DE,OUTPUT_FCB         ; We want to use the first FCB populated by the CCP. 
 				LD      C,Make_File     ; Open File.
 				CALL    BDOS			; 			Get the first matching file.
@@ -480,7 +493,7 @@ SHOW_STATS:
 				
 				CALL	CRLF			; Show the table size.
 				LD		HL,(LABEL_LAST)
-				LD		DE,(LABEL_TABLE)
+				LD		DE,LABEL_TABLE
 				OR		A
 				SBC		HL,DE
 				LD		DE,END_TABLESIZE
@@ -559,11 +572,18 @@ SWITCH_TEST:	INC		HL
 SWITCH_NODECB:	LD		A,(HL)	
 				CP		'H'					; 
 				JR		Z,HEX_ON
+				CP		'D'
+				JR		Z,BE_DRY
 				RET
 				
 HEX_ON:
 				LD		A,$FF
 				LD		(INTELFORMAT),A
+				RET
+
+BE_DRY:			
+				LD		A,$FF
+				LD		(DRY),A				; Do not write output file.
 				RET
 
 ;################ A lot of standard errors below. Anything to ERROR_OUT will dump the stack, restore pre-run
@@ -620,6 +640,8 @@ ERROR_OUT_NOMACRO:							; We just here if there's no macro information to displ
 NO_ERROR_OUT:									; Or we can exit directly via here. 
 				LD		HL,(STACK_SAVE)			; We've messed up the stack. Fix it up before we leave. 
 				LD		SP,HL
+RST 0
+
 				RET								; And just return out... 
 
 ERROR_CAUSE:	DB	$0D,$0A,'Buffer at cause:$'
@@ -675,24 +697,24 @@ PRINTFILENAME_OUT:
 										; This pass collects all the labels.
 ;PASS:	DB	$00							; Moved to Label Table system variables. 
 																		
-PASS1:
-				LD		A,$01
-				LD		(PASS),A			; Record we're on PASS 1. Unknown labels can be ignored here. 
-				CALL	MAKE_PASS			; Make a pass.
-
-				CALL	CRLF					; Note it was completed. In case of anything printed during PASS1, clear a line. 
-				LD		DE,PASS_1_COMPLETE
-				CALL	PRINTSTRING
-				
-				RET
-
-
-PASS2:								; Now make a serious pass.
-		LD		A,$02
-		LD		(PASS),A			; Record we're on PASS 2. Unknown labels can be ignored here. 
-		
-		CALL	MAKE_PASS			; Make a pass.
-		RET
+;PASS1:									; Defuct as I call Make Pass now. 
+;				LD		A,$01
+;				LD		(PASS),A			; Record we're on PASS 1. Unknown labels can be ignored here. 
+;				CALL	MAKE_PASS			; Make a pass.
+;
+;				CALL	CRLF					; Note it was completed. In case of anything printed during PASS1, clear a line. 
+;				LD		DE,PASS_1_COMPLETE
+;				CALL	PRINTSTRING
+;				
+;				RET
+;
+;
+;PASS2:								; Now make a serious pass.
+;		LD		A,$02
+;		LD		(PASS),A			; Record we're on PASS 2. Unknown labels can be ignored here. 
+;		
+;		CALL	MAKE_PASS			; Make a pass.
+;		RET
 
 
 LINE_COUNTER:
@@ -787,6 +809,7 @@ GLOBAL:	DB	6,'GLOBAL'	; Switch back to Global tables. Note: LOCAL can be used mu
 MODID:	DB	5,'MODID'	; Like EQU (same as EQU) but denotes a module ID. Used to affect local variables. Can be used in future to determine if a version class has occured. 
 MODCL:	DB	5,'CLEAN'	; Clean up command to remove module local variables at this point if pass=2. 
 MODCN:	DB	6,'REMOVE'	; Remove all labels after the noted one. 
+
 EQU:	DB	3,'EQU'		; EQUates label,value
 SETVAR:	DB	6,'SETVAR'		; SET's an existing label to the value defined ( like EQU, but can be repeated - Does not create a label if not existing.)
 DB:		DB	2,'DB'		; Define Byte(s)
@@ -806,14 +829,21 @@ IFNZ:	DB	4,'IFNZ'	; If Not Zero, Compile as per below.
 IFPOS:	DB	5,'IFPOS'	; If Positive ( Bit 15 not set ) - Also covers Zero.
 IFNEG:	DB	5,'IFNEG'	; If Negative ( Bit 15 set ) -
 ENDIF:	DB	5,'ENDIF'	; Compile ALL following instructions (end of conditional)
-MACRO:	DB	5,'MACRO'	; Define a macro. MACRO MACRO-NAME CODE MEND defines the Macro. MACLD MACRO-NAME inserts it into code. 
-MEND:	DB	4,'MEND'	; Macro End. 
-MACLD:	DB	5,'MACLD'	; Macro Load. 
+MACRO:	DB	5,'MACRO'	; Define a macro. MACRO MACRO-NAME CODE MEND defines the Macro.
+MEND:	DB	4,'MEND'	; Macro End. Ends the Macro. 
 CLNUP:	DB	5,'CLEAN'	; Clean up the label table ( Remove all entries with a ~ at the start )
 INCLD:	DB	7,'INCLUDE'	; Include - For bringing other files into the assembly. 
 BNCLD:	DB	8,'BINCLUDE'	; Binary Include - For bringing bitmaps, tables and other binary information into the assembly.
 SHWLAB:	DB	10,'SHOWLABELS'	; Show the entire label table.
 SHWLB:	DB	9,'SHOWLABEL'	; Just show the specified label. 
+SHWGRP:	DB	9,'SHOWGROUP'	; Show a marked "group" type label. 
+GROUP:	DB	5,'GROUP'		; Start of a group - followed by a label which is marked with $80 in the count. 
+ENDGRP:	DB	8,'ENDGROUP'	; Mark the end of the group. Write the value in as the current end of the label table.
+DELGRP:	DB	8,'DELGROUP'	; Erase an entire group. 
+OPEN:	DB	4,'OPEN'		; Open a group of labels, is followed by the group name.
+CLOSE:	DB	5,'CLOSE'		; Close a group of labels, is followed by the group name. 
+FATAL:	DB	5,'FATAL'		; Force a fatal error. 
+
 
 ; Opcodes;
 
@@ -1125,8 +1155,8 @@ MACRO_VALUE:
 MACRO_BYTES:
 		DW		$0000					; Not a vector. Just a count. We still need to count how many bytes are used in the macro. Do I make this 8 bits or 16 bits? 256 bytes is a BIG macro. 
 		
-TEST_MACRO:
-		LD		DE,MACRO
+TEST_MACRO:								; This is the MACRO command. NOT a macro. 
+		LD		DE,MACRO				; Remember that the labels here look a LOT like the labels that the Macro Read function uses... They parallel them. BUT DON"T CONFUSE THEM. 
 		CALL	TESTLOOP
 		RET		NZ
 		
@@ -1155,16 +1185,15 @@ TEST_MACRO:
 	POP	DE
 	POP	HL								; Recover the label start and the next label. 
 		
-		CALL	ADD_LABEL_REENTRY		; Call the remaining add-label routine to add the label.
+		CALL	ADD_LABEL_REENTRY		; Call the remaining add-label routine to add the macro label to the label table. 
 										; HL=Start of label (vector to next label)
 										; DE=Previous next label - Macro start.
 		LD		HL,$0000
-		LD		(MACRO_BYTES),HL		; Clear the counter. 
-								
+		LD		(MACRO_BYTES),HL		; Clear the counter. 		
 		
-		
-		LD		A,$FF
-		LD		(IN-MACRO),A			; turn on Macro mode.  We will now write the label. 
+;		LD		A,$FF					; OK, this is bizarre. We're not in the macro mode, but IN-MACRO is only showing up here, despite being elsewhere, and it's not supposed to be here.										; I think the NOTEPAD search is broken. 
+;		LD		(IN-MACRO),A			; turn on Macro mode.  We will now write the label. 
+;										; I see the bug. It's IN MINUS MACRO. I need to figure out what this equates to and what value it's changing randomly and why the assembler doesn't catch it. 
 										
 		CALL	MACRO_LOOP				; Read in and store the macro
 										; Now we close out the macro storage by finishing the label table. 
@@ -1258,7 +1287,9 @@ MACRO_LOOP:
 		LD		A,(EOL)					; Did we get an EOL? We will still count lines, but we need to know if we got an EOL before we clear it. 
 		OR		A
 		JR		Z,MACRO_LOOP_1			; if it's not an EOL yet, we can do another read. 
+
 		CALL	LINE_COUNTER			; Otherwise process the line now, and loop to the next line.
+MACRO_PIPE_FOUND:
 		CALL	MACRO_PIPE				; Separate the lines - but later store a | symbol. 
 		JR		MACRO_LOOP
 		
@@ -1326,7 +1357,7 @@ TEST_CLNUP:
 
 
 SET_SET:
-		CALL	GETWORD_TO_END			; Get the label.
+		CALL	GETWORD_TO_END			; Get the label. And get the comma. 
 		CALL	TEST_EOL				; 
 		CALL	TEST_COMMA
 		
@@ -1514,6 +1545,207 @@ TEST_SHWLB:									; Just show a single label.
 		POP		HL
 		RET		
 
+TEST_SHWGRP:									; Just show a single label.
+		LD		DE,SHWGRP
+		CALL	TESTLOOP
+		RET		NZ
+		
+		CALL	GETWORD_TO_END			; Get the label.
+		LD		A,(BUFFER)
+		OR		$80
+		LD		(BUFFER),A				; Mark the label with bit 7. 
+
+		CALL	MATCH_LABEL				; Match the label. We assume it should exist on Pass 2.
+
+		CALL	SHOW_LABELS_SINGLE			; Just show the label pointed to by HL. 
+
+		CALL	CRLF					; And go onto a new line. 
+		
+		POP		HL
+		RET	
+
+CHECK_PASS1:
+		LD		A,(PASS)
+		DEC		A
+		RET		Z					; This is a "Pass" score for "PASS 1"
+		POP		HL					; POP HL twicce to waste return address twice - Drop out of command and drop out of list of commands. Command is completed. 
+		POP		HL
+		RET							; Fall back two levels and return. 
+
+MARK_BUFFER:						; Set bit 7 of the count to "mark" the packet. 
+		LD		A,(BUFFER)
+		OR		$80
+		LD		(BUFFER),A			; Tag buffer with ID. 
+		RET
+		
+
+TEST_GROUP:							; Same as EQU, but denotes a module ID and Version for the purpose of loading... Later can get this to examine when module repetition is required. 
+		LD		DE,GROUP
+		CALL 	TESTLOOP
+		RET		NZ					; Return if it wasn't a GROUP instruction.
+		
+		CALL	GETWORD_TO_END		; Get the label. 
+		
+		CALL	CHECK_PASS1			; Make sure we are on pass 1. 	
+		CALL	MARK_BUFFER			; Mark the buffer as a special label.
+		
+;		PUSH	HL					; Because we don't want it wasting *this* return address.
+;		CALL	SET_EQU				; Set the EQU. 	 This also creates the Label as a marked label and makes sure we don't have a similar marked label name. 
+
+		CALL	ADD_LABEL			; Create the label as a marked label. 
+
+		PUSH	DE					; Transfer the new "END" of the label table to HL 
+		POP		HL
+		DEC		DE					; Go back to the value high
+		LD		A,H
+		LD		(DE),A
+		DEC		DE
+		LD		A,L
+		LD		(DE),A
+		
+		POP		HL
+		RET							; Waste the return address and exit. 
+
+
+TEST_ENDGROUP:							; Same as EQU, but denotes a module ID and Version for the purpose of loading... Later can get this to examine when module repetition is required. 
+		LD		DE,ENDGRP
+		CALL 	TESTLOOP
+		RET		NZ					; Return if it wasn't an ENDGROUP instruction.
+
+		CALL	GETWORD_TO_END		; Get the label. 
+		
+		CALL	CHECK_PASS1			; Make sure we are on pass 1. 			
+		CALL	MARK_BUFFER			; Mark the buffer as a special label. 
+		
+		CALL	MATCH_LABEL			; 					; If Found     - HL=LABEL START, DE=VALUE START.
+									; If Not Found - HL=END OF TABLE ( value at (HL) should be 0000 )
+		
+		LD		A,(HL)				; Test the GROUP label exists. (it matched a legitimate group)
+		INC		HL
+		OR		(HL)
+		JP		Z,LABEL_NOT_EXIST	; Error 
+		
+		LD		A,(LABEL_LAST)		; Store the last label location into the value of the label. 
+		LD		(DE),A
+		LD		A,(LABEL_LAST+1)
+		INC		DE
+		LD		(DE),A
+		
+		POP		HL					; Waste return address and exit. 
+		RET
+
+TEST_SHOWGROUP:
+		LD		DE,SHWGRP
+		CALL 	TESTLOOP
+		RET		NZ					; Return if it wasn't an ENDGROUP instruction.
+
+		CALL	GETWORD_TO_END		; Get the label of the group we want to show. 
+		
+;;;		CALL	CHECK_PASS1			; this happens borh passes.  			
+		CALL	MARK_BUFFER			; Mark the buffer as a special label. 
+		
+		CALL	MATCH_LABEL			; 					; If Found     - HL=LABEL START, DE=VALUE START.
+									; If Not Found - HL=END OF TABLE ( value at (HL) should be 0000 )
+		
+		LD		A,(HL)				; Test the GROUP label exists. (it matched a legitimate group)
+		INC		HL
+		OR		(HL)
+		JP		Z,LABEL_NOT_EXIST	; Error 
+		
+		DEC		HL					; Back to vector.
+		CALL	SHOW_GROUP			; Show the group to the console.
+		
+		POP		HL					; Waste return address and exit. 
+		RET
+		
+TEST_OPEN:
+		LD		DE,OPEN					; Open a group. Process the labels in this group. 
+		CALL	TESTLOOP
+		RET		NZ
+		
+		CALL	GETWORD_TO_END			; Get the label.
+		LD		A,(BUFFER)
+		OR		$80
+		LD		(BUFFER),A				; Mark the label in the buffer as a group type label. (marked label)
+		CALL	MATCH_LABEL				; Match the label. We assume it should exist.
+										; If Found     - HL=LABEL START, DE=VALUE START.
+
+		CALL	TEST_OPEN_CHECKSTATE
+		
+		CALL	NC,SWAPVALUES			; Swap HL and DE vector values.		
+		
+		POP		HL						; Waste the return address
+		RET								; And exit. 
+
+
+TEST_OPEN_CHECKSTATE:					; Work out whether the vectors for a label are skipped or included in the group marker before swapping/toggling... 
+		PUSH	HL						; Sets Carry if the next jump is less than the alternative jump. 
+		PUSH	DE						; Store vectors to vectors. 
+										; Note: As a byproduct, aside from Carry, also sets BC to the contents of memory pointed to by DE. 
+
+		LD		A,(HL)
+		INC		HL
+		LD		H,(HL)
+		LD		L,A						; Transfer vector at HL to HL.
+		
+		LD		A,(DE)
+		INC		DE
+		LD		C,A
+		LD		A,(DE)
+		LD		B,A
+		PUSH	BC
+		POP		DE						; Transfer vector at DE to DE.
+
+		OR		A
+		SBC		HL,DE					; Test for whether HL is less than DE - means the label is already open. 
+
+		POP		DE
+		POP		HL						; Restore vector vectors
+		RET
+
+SWAPVALUES:
+		CALL	SWAPVALUE
+		INC		DE
+		INC		HL
+		CALL	SWAPVALUE
+		RET
+
+SWAPVALUE:
+		LD		A,(HL)					; Swap the values at (HL) and (DE)
+		PUSH	AF
+		LD		A,(DE)
+		LD		(HL),A
+		POP		AF
+		LD		(DE),A
+		RET
+		
+
+TEST_CLOSE:	
+		LD		DE,CLOSE				; Close a group. Don't process the labels in this group. 
+		CALL	TESTLOOP
+		RET		NZ
+		
+		CALL	GETWORD_TO_END			; Get the label.
+		LD		A,(BUFFER)
+		OR		$80
+		LD		(BUFFER),A				; Mark the label in the buffer as a group type label. (marked label)
+		CALL	MATCH_LABEL				; Match the label. We assume it should exist.
+										; If Found     - HL=LABEL START, DE=VALUE START.
+
+		CALL	TEST_OPEN_CHECKSTATE
+		
+		CALL	C,SWAPVALUES			; Swap HL and DE vector values.		
+		
+		POP		HL
+		RET
+
+
+TEST_FATAL:
+		LD		DE,FATAL
+		CALL	TESTLOOP
+		RET		NZ
+		LD		DE,ERR_FORCED_FATAL
+		JP		ERROR_OUT
 
 
 TEST_BNCLD:
@@ -1611,7 +1843,8 @@ GETFILENAME_CLEAR:
 		LD		(FILENAME_PTR),DE		; Store the write location.
 GETFILENAME_LOOP:
 
-		CALL	GETWORD_TO_END
+;		CALL	GETWORD_TO_END
+		CALL	GETWORD_TO_WS			; Just the next word, which *should* be a single char, but a comma separated list will be counted too. 
 
 		LD		A,(BUFFER)
 		CP		$02						; Should be two bytes at a time. A & for "Literal" and an 8 bit byte following for the character. 
@@ -1641,6 +1874,10 @@ GETFILENAME_LOOP:
 		
 GETFILENAME_DONE:
 										; If we don't do anything here, we can kill it at the JR and make it RET NZ
+										
+		CALL	TEST_LABEL_MACROARG				; Can we just look for arguments here?
+
+										
 		RET
 
 GETFILENAME_SEPARATOR:					; We got a "."
@@ -1699,17 +1936,40 @@ TEST_INSTRUCTIONS:
 		LD		(COMMAND+4),HL		; Clear the command buffer where we might assemble the command. 
 									; A successful routine should POP HL and RET. 
 
+
+		LD		A,(OPERATOR)
+		CP		':'					; Check for a : since if we follow a label with a ':' it's going to be a special label declaration.
+									; We can use other operators here to bypass other checking too if we want.
+		JP		Z,TEST_OPERATOR		; If we ended with an operator, it might be a label, or some special instruction, or a macro. No need to test for instructions.
+									;Note, I need to move the TEST_LABEL to the end... But that also means I can create other operator-based outcomes at the start. 								
+									; Note- Macros shouldn't execute here, because there is no : (Colon) on a macro
 									
 									; First we test for Assembler Directives.
 		CALL	TEST_IF				; Test for conditional statements, because DONT DO ANYTHING IF WE'RE IN ONE.
 		CALL	TEST_2PASSES		; Are we forcing an additional second pass ( within the current global pass - for modules only )
-
-
-		LD		A,(OPERATOR)
-		OR		A
-		JR		NZ,TEST_OPERATOR	; If we ended with an operator, it might be a label, or some special instruction, or a macro. No need to test for instructions.
-									;Note, I need to move the TEST_LABEL to the end... But that also means I can create other operator-based outcomes at the start. 								
 		
+
+									; Now we test opcodes.
+		CALL	TEST_INC			; All INC instructions. 
+		CALL	TEST_DEC			; All DEC instructions. 
+		CALL	TEST_PUSH			; All PUSH instructions.
+		CALL	TEST_POP			; All POP instructions. 
+		CALL	TEST_LD				; All LD instructions... Begin with the 8 bit group. Still need to add special and 16 bit groups. 
+		CALL	TEST_ARITHMETIC		; All Arithmetic instructions. 
+		CALL	TEST_RET			; All RET instructions, including conditional. 
+		CALL	TEST_JP				; All JP instructions 
+		CALL	TEST_CALL			; All CALL instructions. 
+		CALL	TEST_JR				; All Jump Relative instructions. Add DJNZ-D in here also. But we call it separately.
+		CALL	TEST_DJNZ			; DJNZ
+		CALL	TEST_SINGLE_OPCODE	; All the single opcodes ( no arguments )
+		CALL	TEST_RST			; All the RST codes
+		CALL	TEST_IN				; All the IN codes. 
+		CALL	TEST_OUT			; All the IN codes. 
+		CALL	TEST_EX				; Multiple EXCHANGE codes. 
+		CALL	BITTEST				; All Bit Related Instructions. 
+		CALL	TEST_IM				; Test Interrupt Modes.
+
+									; And other assembler directives. 
 		CALL	TEST_MODID			; Module ID - For version checking / reduction of redundant code 
 		CALL	TEST_MODCL			; Clean up all local variables in label table after the specified MODID value. (eg, remove module local variables and any subsequent local variables )
 		CALL	TEST_MODCN			; END the label table at the specified label AND delete the label itself as well... All subsequent (created later) labels are also deleted. 
@@ -1734,30 +1994,15 @@ TEST_INSTRUCTIONS:
 		CALL	TEST_BNCLD			; Binary Includes
 		CALL	TEST_SHWLAB			; Show label table. 
 		CALL	TEST_SHWLB			; Show single label in the label table. 
+;		CALL	TEST_SHWGRP			; Show a group label. Like a normal label, but with a special marker. 
+		CALL	TEST_SHOWGROUP		; Alternative
 		CALL	TEST_MACRO			; Process any macro setups. 
-
-
-
-									; Now we test opcodes.
-		CALL	TEST_INC			; All INC instructions. 
-		CALL	TEST_DEC			; All DEC instructions. 
-		CALL	TEST_PUSH			; All PUSH instructions.
-		CALL	TEST_POP			; All POP instructions. 
-		CALL	TEST_LD				; All LD instructions... Begin with the 8 bit group. Still need to add special and 16 bit groups. 
-		CALL	TEST_ARITHMETIC		; All Arithmetic instructions. 
-		CALL	TEST_RET			; All RET instructions, including conditional. 
-		CALL	TEST_JP				; All JP instructions 
-		CALL	TEST_CALL			; All CALL instructions. 
-		CALL	TEST_JR				; All Jump Relative instructions. Add DJNZ-D in here also. But we call it separately.
-		CALL	TEST_DJNZ			; DJNZ
-		CALL	TEST_SINGLE_OPCODE	; All the single opcodes ( no arguments )
-		CALL	TEST_RST			; All the RST codes
-		CALL	TEST_IN				; All the IN codes. 
-		CALL	TEST_OUT			; All the IN codes. 
-		CALL	TEST_EX				; Multiple EXCHANGE codes. 
-		
-		CALL	BITTEST				; All Bit Related Instructions. 
-		CALL	TEST_IM				; Test Interrupt Modes.
+;		CALL	TEST_MARK
+		CALL	TEST_GROUP			; Was it a group command to establish a group?
+		CALL	TEST_ENDGROUP		; Was it the end mark of a group?
+		CALL	TEST_OPEN			; Open a group. Process labels within the group.
+		CALL	TEST_CLOSE			; Close a group - Don't process labels within this group.
+		CALL	TEST_FATAL			; FATAL error forced. 
 
 TEST_OPERATOR:						; If we found an operator, we bypass other selection, though a label might also be a macro, so we fall through as a last resort. 
 		CALL	TEST_LABEL			; See if we found a label. 
@@ -1820,58 +2065,90 @@ TEST_LABEL_MACRO:						; Second attempt after test label. It might be a macro.
 		CALL	CHECK_MACRO				; AND is it a macro.
 		RET		Z						; If it's not a valid macro ( or if it's just a normal label ) then just exit, and let the error handler take care of the rest. 
 
-		LD		A,(EOL)
-		OR		A
-		CALL	TEST_LABEL_MACROARG	; Look for macro arguments if it's not EOL encountered.
+;		LD		A,(EOL)					; I don't need to look for EOL here, because the macro arg call next tests it. 
+;		OR		A
+
+		CALL	TEST_LABEL_MACROARG		; Look for macro arguments if it's not EOL encountered. Assign them to ARG1, ARG2, ARG3 etc.
+
+		CALL	STACK_MACRO				; Store any macro pointers in case we're nesting. 
+
+		LD		HL,(TEMP_POINTER)
+		LD		(MACRO_POINTER),HL
+		LD		HL,(TEMP_LOCATION)
+		LD		(MACRO_LOCATION),HL
+		LD		HL,(TEMP_COUNT)
+		LD		(MACRO_COUNT),HL		; Set the pointer and counter and location from the values determined during Check macro. 
 		
-		LD		A,$FF
+		LD		A,(IN_MACRO)			; Increase Macro indent. This will put it into Macro mode, if it's not already in Macro mode. It will also stop processing arguments, so we do this here.
+		INC		A
 		LD		(IN_MACRO),A
+		AND		$E0						; Maximum of 32 nests for macros calling macros. Remove $1F. 
+		
+		;BUFFER THE LAST MACRO?
 
-		JP		TEST_LABEL_EXIT			; The Macro has been engaged or processed. Exit as per normal.  
+		JP		Z,TEST_LABEL_EXIT			; The Macro has been engaged or processed. Exit as per normal.  
+		LD		DE,ERR_TOO_MANY_NESTS
+		JP		ERROR_OUT				; If we have more than 32 nests. 
 
+CURRENTARG: DW	$0000					; Temp store for the current argument vector. 
 
 TEST_LABEL_MACROARG:
-		LD		HL,$0000		
-		LD		(VARG1),HL
-		LD		(VARG2),HL
-		LD		(VARG3),HL				; Preset (zero) the system arguments.
+;		LD		HL,$0000				; Not sure if I care if these are all zeroed. Relevant ones get set. 
+;		LD		(VARGC),HL				; Clear the argument count. 
+;		LD		(VARG1),HL
+;		LD		(VARG2),HL
+;		LD		(VARG3),HL				; Preset (zero) the system arguments.
+;		LD		(VARG4),HL
+;		LD		(VARG5),HL
+;		LD		(VARG6),HL
+;		LD		(VARG7),HL
+;		LD		(VARG8),HL
+;		LD		(VARG9),HL				; Zero out all unused arguments.  Might not be needed. 
+
+		LD		HL,VARGC				; The count.
+		LD		(CURRENTARG),HL			; Store itm so we know where we're writing it from. ( We add 9 before we write it )
+		XOR		A
+		LD		(VARGC),A				; Zero count on the number of arguments first. 
+
+TEST_LABEL_MACROARG_LP:					; Loop to iterate. 
 
 		CALL	GETARG					; Get the argument.
-		RET		Z
-		LD		HL,(VALUE)
-		LD		(VARG1),HL				; Store in ARG1. 
+		RET		Z						; If the zero flag is set,
 		
+		LD		HL,(CURRENTARG)
+		LD		DE,$0009
+		OR		A
+		ADC		HL,DE
+		LD		(CURRENTARG),HL			; Move the variable vector along.
+		
+		LD		A,(VARGC)
+		INC		A
+		CP		10						; Only 9 arguments. 10 is too many. Error if so.
+		JR		Z,TOO_MANY_ARGUMENTS	; Error if there are 10.
+		LD		(VARGC),A				; Otherwise increase the argument count. 
 
-		LD		A,(ARGOPERATOR)
+		LD		A,(VALUE)
+		LD		(HL),A					; Store in ARG(ARGC). 
+		LD		A,(VALUE+1)
+		INC		HL
+		LD		(HL),A					; 
+
+		LD		A,(ARGOPERATOR)			; Are there more argument separators to check?
 		CP		','						; ARG separator.
-		RET		NZ
+		JR		Z,TEST_LABEL_MACROARG_LP	; Iterate if so. 
 		
-		CALL	GETARG					; Get the argument.
-		RET		Z
-		LD		HL,(VALUE)
-		LD		(VARG2),HL				; Store in ARG1. 
 		
-		LD		A,(ARGOPERATOR)
-		CP		','						; ARG separator.
-		RET		NZ
+		RET								; Otherwise we've assigned the arguments and are done. 
+		
 
-		CALL	GETARG					; Get the argument.
-		RET		Z
-		LD		HL,(VALUE)
-		LD		(VARG3),HL				; Store in ARG1. 
-		
-		LD		A,(ARGOPERATOR)
-		CP		','
-		RET		NZ
-		
+TOO_MANY_ARGUMENTS:
 		LD		DE,ERR_TOO_MANY_ARGS
 		JP		ERROR_OUT
 		
-;;;		RET
 
 ARGOPERATOR:	DB	$00					; Temporary Argument Operator. 
 		
-GETARG:
+GETARG:									; Get any arguments ( comman delimited after currently processed segment ) 
 		LD		A,(EOL)
 		XOR		$FF
 		RET		Z						; Check we're not at EOL already. 
@@ -1918,23 +2195,72 @@ CHECK_MACRO:							; See if the current label is a macro.
 		SUB		(HL)
 		RET		Z						; Compare DE to value in HL and return if they are the same. 
 		
-										; Seems the label had some valid post-value data, so is most likely a MACRO. 
-										; I could do something here, like return a vector, or the number of bytes. 
-		LD		(MACRO_POINTER),DE		; Store the pointer now to the first macro byte in case we use it. 
+; Macro Variables.
+;IN_MACRO			No longer a flag. It's now an index how deep into the MACROs we are. Up to 64 macros.  
+;*MACRO_LOCATION		Macros are stored in the label table. This is the label location.
+;*MACRO_COUNT		This is the "VALUE" of the Macro label, as a 16 bit number, which is the length of the macro.  If there's count, it's active. 
+;*MACRO_POINTER		This is the pointer to the data stored in the table. 
+;MACRO_STACK		The location of the above..... 
+; * = STACK These here. Store previous values before saving. 
+
+
+;		LD		(MACRO_POINTER),DE		; Store the pointer now to the first macro byte in case we use it. 
+		LD		(TEMP_POINTER),DE		; Store the pointer now to the first macro byte in case we use it. 
 		EX		DE,HL					; Swap HL and DE
-		LD		(MACRO_LOCATION),DE		; Store the pointer to the macro location in memory.
+;		LD		(MACRO_LOCATION),DE		; Store the pointer to the macro location in memory.
+		LD		(TEMP_LOCATION),DE		; Store the pointer to the macro location in memory.
 		DEC		HL
 		LD		D,(HL)
 		DEC		HL
 		LD		E,(HL)
-		LD		(MACRO_COUNT),DE		; The number of bytes in the macro to transfer.
-		
-		LD		A,$1
-;;;;		LD		(IN_MACRO),A			; Mark the flag to let the system know a macro is in operation now. NO DON'T. We still need to read the arguments yet !! ! ! ! !
-											; Switching to macro mode now prevents us from reading arguments because we saw off the branch we're sitting on.
+;		LD		(MACRO_COUNT),DE		; The number of bytes in the macro to transfer.
+		LD		(TEMP_COUNT),DE		; The number of bytes in the macro to transfer.
+
+
+
 		OR		A						; Clear zero flag to indicate it wasn't a Macro. 
-		
+
 		RET
+
+STACK_MACRO:							; Stack Macro. 
+		PUSH AF	
+		PUSH DE							; Save the new macro details on the ssystem stack before preserving any old values on the Macro stack. 
+		PUSH HL
+										; Preserve any existing values on the MACRO STACK. ( 64x3 ) = 32 deep. 
+		LD		A,(IN_MACRO)			; When it's zero, we will just write null values, but we don't need to check. 
+
+		LD		E,A
+		RLCA							; Double A.	Clear carry ( since A won't go past 63 )
+		ADD		A,E
+		RLCA							; Now we have 6 bytes reserved per stack entry. 192 bytes stack = 32 nestings of macros calling macros. 
+		LD		E,A						; Now we've multiplied A by 6, load it into DE. 
+		LD		D,$00
+		LD		HL,MACRO_STACK
+		ADD		HL,DE					; HL = Stack Write Location.
+		
+		LD		A,(MACRO_POINTER)
+		LD		(HL),A
+		LD		A,(MACRO_POINTER+1)
+		INC		HL
+		LD		(HL),A
+		LD		A,(MACRO_LOCATION)
+		INC		HL
+		LD		(HL),A
+		LD		A,(MACRO_LOCATION+1)
+		INC		HL
+		LD		(HL),A
+		LD		A,(MACRO_COUNT)
+		INC		HL
+		LD		(HL),A
+		LD		A,(MACRO_COUNT+1)
+		INC		HL
+		LD		(HL),A
+		
+		POP	HL							; Recover new MACRO details, and write them into the current variables. 
+		POP	DE
+		POP	AF
+		RET
+		
 
 IMODE_ERROR:
 LD		DE,ERR_IMODE
@@ -3643,10 +3969,10 @@ TEST_EX_DEHL:
 ;
 
 CLEAN_LABEL:		; Routine to delete a label/labels... Foreseeing that we might get a LOT of labels in the code. ONLY for deleting local labels used in included ASM files.
-		LD		HL,LABEL_TABLE			; Starting point. We always start with the beginning of the table, because that's where system labels exist. 
-		LD		DE,LABEL_TABLE
-;		LD		HL,(LABEL_BASE)			; Starting point.
-;		LD		DE,(LABEL_BASE)
+;		LD		HL,LABEL_TABLE			; Starting point. We always start with the beginning of the table, because that's where system labels exist. 
+;		LD		DE,LABEL_TABLE
+		LD		HL,(LABEL_BASE)			; Starting point.
+		LD		DE,(LABEL_BASE)
 
 CLEAN_LABEL_TOP:
 		PUSH	DE
@@ -3696,19 +4022,21 @@ CLEAN_LABEL_DONE:
 		INC		HL
 		LD		(HL),$00 				; Write a new marker for the end of the table.
 		RET								; And exit. 
-		
+
+
+MARKED_LABEL:	DB	$00					; Flag, if label is marked, will hold the length of the label. If a normal label, will hold $00. 		
 
 MATCH_LABEL:		; Before we add a label, or when searching for a value, we must search to 
 					; see if the label exists. This also locates the next label location.
 					; If Found     - HL=LABEL START, DE=VALUE START.
 					; If Not Found - HL=END OF TABLE ( value at (HL) should be 0000 )
-		LD		HL,LABEL_TABLE			; Initial label table location. Always the beginning because that's where system labels exist. 
-;		LD		HL,(LABEL_BASE)			; Initial label table location.
+;		LD		HL,LABEL_TABLE			; Initial label table location. Always the beginning because that's where system labels exist. 
+		LD		HL,(LABEL_BASE)			; Initial label table location.
 
 MATCH_LABEL_LOOP:
 		PUSH	HL						; Store the current vector on the stack. We can retrieve it without backing it out. 
 
-		LD		A,(HL)
+		LD		A,(HL)					; Test The label vector to see if we've hit the end of the labels. 
 		INC		HL
 		OR		(HL)					; are the two locations zero?
 		JR		Z,MATCH_LABEL_NOTFOUND	; If the link vector is zero, it means there is no label here yet. 
@@ -3718,11 +4046,22 @@ MATCH_LABEL_LOOP:
 										; If there was a vector though, then
 		INC		HL						; Get to the label part to see if it matches buffer. 
 		
-		LD		A,(BUFFER)				; Number of characters.
+		LD		A,(BUFFER)				; Number of characters in buffer. 	; Note we don't have the 128 byte limit yet, so we can match against special labels - eg, Macros, Markers. 
 		CP		(HL)					; Check against label number of characters.
 		JR		NZ,MATCH_LABEL_NEXT		; Not same length? Not a match. 
+
+		LD		(MARKED_LABEL),A		; Set the size into the marked label flag. Shows the marked bit and the label size. At this point we haven't tested, but it's a non-zero flag. 										; 
+		AND		$7F						; Mask size, since the buffer < 120 characters... We never need to scan more than this. But the high bit indicates we're looking for a marker.
+		LD		B,A						; Count with B through the characters to match. B now holds the lower 7 bits of the buffer character count value. 
+		
+		CP		(HL)					; Check if the high bit was set now.
+		JR		NZ,MATCH_LABEL_REGULAR	; If it still matches, high bit was not set, so wasn't a label. Bypass noting the label was a marked label.
+		
+		XOR		A
+		LD		(MARKED_LABEL),A		; Zero out Marked Label since it's a normal unmarked label. 
+		
+MATCH_LABEL_REGULAR:					; We jumped here if it was NOT a normal label so (MARKED_LABEL) still holds a non-zero value. 
 		INC		HL						; Step up to label. 
-		LD		B,A						; Count through the characters to match. 
 		LD		DE,BUFFER+1				; What we're matching against?
 MATCH_LABEL_CHECK:
 		LD		A,(DE)
@@ -3784,7 +4123,7 @@ LABEL_OVERFLOW:
 
 ;LABEL_POS:	DW	LABEL_TABLE					; Where are we in the label table?
 ;.EQU	LABEL_TOP,$DF00						; Generate label overflow error if Label Pos goes above Label Top.
-ADD_LABEL:
+ADD_LABEL:									; On exit, DL points to the end of the label table. HL points to the final label vector that points to the end of the label table. 
 ;		LD		A,(PASS)
 ;		LD		HL,GPASS
 ;		OR		(HL)						; A will be either 1 ( pass 1), 2 ( Pass1 or Pass2 ) or 3 (Pass 3) 
@@ -3807,9 +4146,8 @@ ADD_LABEL_REENTRY:						; MACRO's reuse this code, but can't work with pre-exist
 		EX		DE,HL					; Move the location of the label to DE, and HL with Memory Top. 
 ;		LD		HL,LABEL_TOP			; The highest memory address of a label. 
 
-		LD		HL,0-258				; Allow 258 bytes between Stack and Label Buffer. 
+		LD		HL,0-258				; Allow 258 bytes between Stack and Label Buffer. Test for stack coming too close to labels before adding label. 
 		ADD		HL,SP					; The stack is coming in from the other side.
-		
 		OR		A
 		SBC		HL,DE					; Check overflow of label. 
 		JR		C,LABEL_OVERFLOW		; Label memory exhausted. Test this later.
@@ -3822,6 +4160,7 @@ ADD_LABEL_REENTRY:						; MACRO's reuse this code, but can't work with pre-exist
 		INC		DE						; Go past linked list vector. Destination is now the label. 
 		
 		LD		A,(BUFFER)				; Number of bytes to copy (label).
+		AND		$7F						; Make sure we mask the count to 128 bytes or less. 
 		INC		A						; Label length + character count at start. 
 		LD		C,A						;
 		LD		B,$00					; HL is Buffer holding the label, DE is the label part of the entry
@@ -3838,11 +4177,12 @@ ADD_LABEL_REENTRY:						; MACRO's reuse this code, but can't work with pre-exist
 										; It's a new entry so zero it. 
 		
 		
-		XOR		A
+		XOR		A						; Mark the end of the label table with a $0000.
 		LD		(DE),A
 		INC		DE
 		LD		(DE),A					; And write 0000 to the next label record to show it's the end of the list
 		DEC		DE						; And decrement so DE holds the vector to it.
+		LD		(LABEL_LAST),DE			; And update the end of the table. 
 		
 		POP		HL						; Recover the vector at the start of the label.
 		LD		(HL),E
@@ -3909,8 +4249,8 @@ PRINTWORD_EOL:			DB	' EOL:$'
 PRINTWORD_VALUE:		DB	' Value?:0x$'
 
 PRINTWORD_EVAL:	DB	' EVAL $'
-PRINTWORD_WS:	DB	' 2WS  $'
-PRINTWORD_xEND:	DB	' 2END $'
+PRINTWORD_WS:	DB	' TO_WS  $'
+PRINTWORD_xEND:	DB	' TO_END $'
 
 
 PWEVAL:	
@@ -3971,6 +4311,7 @@ PRINTBUFFER:												; What's in the Entry Buffer at the moment?
 				LD		A,(HL)
 				OR		A									; Test A
 				JR		Z,PRINTWORD_NOBUFFER				; If there's nothing in the buffer.
+				AND		$7F									; Mask the length, because we only deal with the lower 7 bits. Bit8 is a marker. 
 
 				LD		B,A									; Transfer the Count
 				INC		HL
@@ -4062,10 +4403,17 @@ GETCHAR_MACRO:
 		LD		(MACRO_COUNT),HL
 		LD		A,H
 		OR		L
-		JR		NZ,GETCHAR_MACRO_MORE
+		JR		NZ,GETCHAR_MACRO_MORE	; Exit via the character collection if we're not on the last character. 
 		
-		XOR		A
+		CALL	GETCHAR_MACRO_MORE		; Just call it if we're on the last one. 
+		PUSH	AF						; And store the last character. 
+		LD		A,(IN_MACRO)
+		DEC		A
 		LD		(IN_MACRO),A
+		CALL	UNSTACK_MACRO			; Recover any previous macro pointers and counters. 
+		POP		AF						; And restore the last character. f
+		RET
+		
 GETCHAR_MACRO_MORE:
 		LD		HL,(MACRO_POINTER)
 		LD		A,(HL)
@@ -4076,7 +4424,41 @@ GETCHAR_MACRO_MORE:
 ;	CALL PRINTCHARE
 ;POP AF
 		RET
-				
+	
+
+UNSTACK_MACRO:
+										; Recover any existing values on the MACRO STACK. ( 64x3 ) = 32 deep. Call after decrementing IN_MACRO.
+		LD		A,(IN_MACRO)			; When it's zero, we will just write null values, but we don't need to check. 
+		LD		E,A
+		RLCA							; Double A.	Clear carry ( since A won't go past 63 )
+		ADD		A,E
+		RLCA							; Now we have 6 bytes reserved per stack entry. 192 bytes stack = 32 nestings of macros calling macros. 
+		LD		E,A						; Now we've multiplied A by 6, return to DE. 
+		LD		D,$00
+		LD		HL,MACRO_STACK
+		ADD		HL,DE					; HL = Stack Write Location.
+		
+		LD		A,(HL)
+		LD		(MACRO_POINTER),A
+		INC		HL
+		LD		A,(HL)
+		LD		(MACRO_POINTER+1),A
+		INC		HL
+		LD		A,(HL)
+		LD		(MACRO_LOCATION),A
+		INC		HL
+		LD		A,(HL)
+		LD		(MACRO_LOCATION+1),A
+		INC		HL
+		LD		A,(HL)
+		LD		(MACRO_COUNT),A
+		INC		HL
+		LD		A,(HL)
+		LD		(MACRO_COUNT+1),A	
+		RET
+
+
+		
 GETCHAR:
 				LD		A,(IN_MACRO)
 				OR		A
@@ -4106,6 +4488,9 @@ GETCHAR_NEXTPAGE:
 				LD		HL,(CHAR_RECORD)
 				INC		HL
 				LD		(CHAR_RECORD),A		; Update the record counter we want. Not sure I really need to do this, but later I'll add line counter too.
+	
+		LD		DE,$0080
+		LD		HL,$0000					; Reset values of DE and HL to ensure we get the correct character. 
 
 				RET							; Get the next 
 
@@ -4379,15 +4764,24 @@ GETWORD_CHAR_CAPS:
 
 
 GETWORD_ADDCHAR:							; Add the character to the buffer.
-				LD		HL,(BUFFER_PTR)		
-				LD		(HL),A
+				LD		HL,(BUFFER_PTR)		; Locate the next place in the buffer. 
+				LD		(HL),A				; Store the character in the processing buffer.
 				INC		HL
-				LD		(BUFFER_PTR),HL
+				LD		(BUFFER_PTR),HL		; Update the buffer pointer and store it. 
+				LD		DE,BUFFER_PTR		; If the buffer pointer points at itself, it's about to go pear shaped. Kill it now.  
+				OR		A
+				SBC		HL,DE
+				LD		A,H
+				OR		L
+				JR		Z,GETWORD_OVERFLOW	; Trap the overflow before the buffer causes a crash. 
+											; Otherwise the write was OK so just carry on. 
 				LD		HL,BUFFER
-				INC		(HL)					
+				INC		(HL)				; Increase count for number of characters in buffer. 		
 				RET
 
-
+GETWORD_OVERFLOW:
+				LD		DE,ERR_BUFFER_OVERFLOW	; Oops - the segment was too big. Buffer overflow. 120 byte limit. 
+				JP		ERROR_OUT				
 
 
 
@@ -4651,8 +5045,11 @@ ERR_LABEL_ALREADY_EXIST: DB 'Label reassignment attempted$'
 ERR_MACRO:				DB	'Macro already exists$'
 ERR_MEND:				DB	'Macro never ends$'
 ERR_ZEROSIZE:			DB	'Zero size not permitted$'
+ERR_BUFFER_OVERFLOW:	DB	'Line segment too big$'
 ERR_LABEL_OVERFLOW:		DB	$0D,$0A,'Out Of Memory$'
 ERR_TOO_MANY_ARGS:		DB	$0D,$0A,'Too many Macro arguments$'
+ERR_TOO_MANY_NESTS:		DB	$0D,$0A,'Too many nests$'
+ERR_FORCED_FATAL:		DB	$0D,$0A,'Source forced fatal error$'
 NOERRORS:				DB	$0D,$0A,'NO errors encountered. Assembly Completed.$'
 		
 
@@ -5244,6 +5641,9 @@ WRITEBYTE:
 		LD		A,(GPASS)
 		CP		$01
 		JR		Z,DRY_WRITE				; or if in Global pass 1, don't write anything. 
+		LD		A,(DRY)
+		OR		A
+		JR		NZ,DRY_WRITE			; or we said not to write a file.
 
 		
 		LD		A,(INTELFORMAT)
@@ -5620,6 +6020,7 @@ MULTIPLY_SHIFT:
 ;###########################################################################
 
 SHOW_LABEL_NEXT:	DW	$0000	; 16 bit space to store next label pointer so we can find macros
+SHOW_LABEL_LAST:	DW	$0000	; If it's a group, the address of the last label we want to show. 
 
 SHOW_CHAR:			; Show a character
 	PUSH	HL
@@ -5643,35 +6044,115 @@ SHOW_LABELS_LOOP:
 	CALL	SHOW_LABELS_SINGLE			; Show a single label located at HL. 
 	JP		SHOW_LABELS_LOOP
 
+
+SHOW_GROUP_NOTICE:
+	DB		'*CLOSED-GROUP*',$0A,$0D,'$'
+
+SHOW_GROUP:								; Enter this with a group label in buffer.
+	LD		(SHOW_LABEL_NEXT),HL		; Preserve HL = The start of the group label. 
+	LD		(SHOW_LABEL_LAST),DE		; Preserve DE = Value at END of SHOWGROUP label. (ie, the end of the label group )
+
+	CALL 	SHOW_LABELS_SINGLE			; Show the first label anyway, it's the group label. We know it's there. 
+	
+	LD		HL,(SHOW_LABEL_NEXT)		; Recover original start of label. 
+	LD		DE,(SHOW_LABEL_LAST)
+	CALL	TEST_OPEN_CHECKSTATE		; Carry reflects test outcome, BC is set to the value in the memory location pointed to by DE. 
+
+
+	JR		C,SHOW_GROUP_NOTCLOSED		; Will jump if group is already open. 
+										; Note BC holds the vector at the memory location pointed to by DE due to the te
+	EX		DE,HL						; Swap these two. 
+	LD		(SHOW_LABEL_NEXT),BC		;Recover the new required show_label_next value from BC, which reflects the value pointed to by DE after testing the OPEN state of the group label. 
+
+	PUSH	DE							; Show a closed group. ( So it's obvious the labels aren't being called. )
+	LD		DE,SHOW_GROUP_NOTICE
+	LD		C,Print_String
+	CALL	BDOS
+	POP		DE
+	
+	JR		SHOW_GROUP_CLOSED			; Return point for closed group. 
+
+SHOW_GROUP_NOTCLOSED:	
+
+;	CALL	CRLF
+										; We have to recover the vector at (HL) first, since it's the location of the last label ( first label outside group )
+	LD		HL,(SHOW_LABEL_LAST)		;Memory location of last label.
+	LD		E,(HL)
+	INC		HL
+	LD		D,(HL)
+
+SHOW_GROUP_CLOSED:						; Return point if group was closed.
+	LD		(SHOW_LABEL_LAST),DE		; Store the value at (DE) in (SHOW_LABEL_LAST) - It's the first label we don't show when showing a group.
+	LD		HL,(SHOW_LABEL_NEXT)		; And retrieve the first label. 
+
+	
+SHOW_GROUP_LOOP:
+	LD		(SHOW_LABEL_NEXT),HL		; Temp store label vector. 
+	LD		A,(HL)
+	INC		HL
+	OR		(HL)
+	RET		Z							; We end if we hit the end of the table, just like always.
+	DEC		HL
+	LD		DE,(SHOW_LABEL_LAST)
+	OR		A
+	SBC		HL,DE
+	LD		A,H
+	OR		L
+	RET		Z							; We reached the end of the group.
+	LD		HL,(SHOW_LABEL_NEXT)
+
+	CALL	SHOW_LABELS_SINGLE
+	JP		SHOW_GROUP_LOOP
+
+GROUP_MARKER:	DB	$00
+
+DEHEXPRINT:
+	PUSH	HL
+	PUSH	BC
+	EX		DE,HL
+	CALL	PRINTHEX16
+	POP		BC
+	POP		HL
+	RET
 										
 SHOW_LABELS_SINGLE:						; Enter with HL pointing to the start vector for the label. 
+	PUSH	HL
+	POP		DE
+	CALL	DEHEXPRINT
+	
+	LD		E,'>'
+	CALL	SHOW_CHAR
+
 	LD		E,(HL)						; Transfer the next vector to DE.
 	INC		HL
 	LD		D,(HL)
 	LD		A,E
+	
 	LD		(SHOW_LABEL_NEXT),DE		; Store the vector to the next label in a temporary variable. 
+	CALL	DEHEXPRINT					; Print the value in DE, preserve HL and BC. 
+	
 	INC		HL
-	LD		B,(HL)						; Get the number of characters in the label name in B, 
-SHOW_LABELS_PLOOP:
-	INC		HL
-	LD		E,(HL)
-	CALL	SHOW_CHAR					; Display the character in the label. 
-	DJNZ	SHOW_LABELS_PLOOP			; All of the characters in the label are displayed one after another. 
+	LD		A,(HL)						; Get the number of characters in the label name in B, 
+	AND		$7F							; Mask the number of characters.
+	LD		B,A							; And move to B. 
+	CP		(HL)
+	JR		Z,SHOW_LABELS_NORMAL		; If it's a normal label and not a marker, just continued.
+	
+	LD		E,'*'
+	CALL	SHOW_CHAR					; Just to make the label show up as a marked label. BC is preserved. 
+	
+	CALL	SHOW_LABELS_PLOOP			
+	JP		SHOW_LABEL_NEXTLABEL		; And exit via the next label end, also make sure we have the correct vector. 
+	
+
+SHOW_LABELS_NORMAL:						; HL is already pointing at the label, with the length of the label in B
 
 	LD		E,' '
-	CALL	SHOW_CHAR					; Make a space. (Maybe make a tab later?)
+	CALL	SHOW_CHAR					; Just a space for the moment, but later indent on depth of group. 
 
-	INC		HL
-	LD		E,(HL)						; Get the value in the label / variable. 
-	INC		HL
-	LD		D,(HL)						; DE now holds the value. 
+	CALL	SHOW_LABELS_PLOOP			; Show the label name, then a space, then the label value in hex.
 
-	PUSH HL								; Preserve HL
-	EX		DE,HL						; Transfer the value from DE to HL for display.
-	CALL	PRINTHEX16					; Print the value of the label currently in HL . - As hex. 
-	POP HL								; Recover HL. 
-	
-	INC		HL							; Now we see if we really are at the end of a label. If it's a normal label, we're at the end. 
+										; Now we see if we really are at the end of a label. If it's a normal label, we're at the next label. If it's a macro, we're not at the next label. 
 	PUSH	HL							; First preserve the current memory location.
 	LD		DE,(SHOW_LABEL_NEXT)		; We figure this out by comparing HL ( Where we are in the table ) with DE ( Where the next label should start. )
 	OR		A							; If they are the same, it's a normal label, otherwise it's most likely a macro. 
@@ -5704,7 +6185,31 @@ SHOW_LABEL_NEXTLABEL:					; From here, we just repeat.
 	RET
 
 	
+SHOW_LABELS_PLOOP:						; Show Label Printloop. Print the label next up (HL is at the start of the text, B=length of label name
+	INC		HL
+	LD		E,(HL)
+	CALL	SHOW_CHAR					; Display the character in the label. 
+	DJNZ	SHOW_LABELS_PLOOP			; All of the characters in the label are displayed one after another. 
 
+	LD		E,' '
+	CALL	SHOW_CHAR					; Make a space. (Maybe make a tab later?)
+
+	INC		HL
+	LD		E,(HL)						; Get the value in the label / variable. 
+	INC		HL
+	LD		D,(HL)						; DE now holds the value. 
+
+;	PUSH HL								; Preserve HL
+;	EX		DE,HL						; Transfer the value from DE to HL for display.
+;	CALL	PRINTHEX16					; Print the value of the label currently in HL . - As hex. 
+;	POP HL								; Recover HL. 
+
+	CALL	DEHEXPRINT					; Print the value in DE, preserve HL and BC. 
+	
+	INC		HL							; And move onto the next label ready to read it, though we might be in Macro space also. 
+
+	RET
+	
 ; The Label Table begins with 0000 which moves along to the end as it is populated.		
 ; We can prepopulate it with System Variables (eg PROGRAM_COUNTER) or with System Macros, or with System Variables such as the Program Counter ( Alternative to ^ )
 
@@ -5752,7 +6257,8 @@ BUFFER:			BLOCK	BUFFERSIZE		; Allows for short words, and long evaluated express
 										; Block size can be changed.
 										; First byte is the number of characters.
 										; Last byte after characters should be zero. Ignores whitespace. 
-BUFFER_PTR:		DW	BUFFER+1			; What part of the buffer we are in. It's a 16 bit location, directly for buffer. 
+		DB	$00		; +1 for the buffersize because the current cross-assembler can't handle BLOCK BUFFERSIZE+1 
+BUFFER_PTR:		DW	BUFFER+1			; What part of the buffer we are in. It's a 16 bit location, directly for buffer. Must be directly after the BUFFER reservation block. 
 
 
 PREFIX:			DB		$00				; Are we adding a prefix?
@@ -5762,11 +6268,20 @@ ADDPOST:		DB		$00				; We may need a flag to tell us to add a postfix.
 OPCODES:			DW		$0000			; How many opcodes did we write?			
 
 CONDITIONAL:		DB		$00				; While this is $00, process instructions. Don't change this until we get the directive IFEND							
+DRY:			DB		$00					; If not zero, dry write always. ( never write code )
 
-IN_MACRO:			DB		$00				; Flag - When I'm in a MACRO, this should be non-zero. Indicates program bytes should be pulled from the macro. 00= not in macro. 
+;IN_MACRO:			DB		$00				; Flag - When I'm in a MACRO, this should be non-zero. Indicates program bytes should be pulled from the macro. 00= not in macro. 
+											; I'll just increase it by 1 for each iteration of a macro, so macros can call macros. 
+
+TEMP_LOCATION:		DW		$0000			; Don't update the macro_location, etc, until we activate the macro, because it saws off the branch we're sitting on. 
+TEMP_COUNT:			DW		$0000
+TEMP_POINTER:		DW		$0000
 MACRO_LOCATION:		DW		$0000				; Macros are stored in the label table. This is the label location.
 MACRO_COUNT:		DW		$0000				; This is the "VALUE" of the Macro label, as a 16 bit number, which is the length of the macro.  If there's count, it's active. 
 MACRO_POINTER:		DW		$0000				; This is the pointer to the data stored in the table. 
+
+DB 'MACROSTACK'
+MACRO_STACK:		BLOCK	192				; Lets allow macros to call up to 64 macros. Three values to stack... 
 
 ; Macro data format - 
 ; dw $0000 	- Vector to next label.
@@ -5832,38 +6347,61 @@ BINCLUDE_FILENAME_HND:	DB $00,$00,$00,$00
 BINCLUDE_BUFFER:
 BLOCK $80				; 128 byte buffer for binary input. 
 
+CONOUT_FCB:			DB	$00				; Current drive default. 		Console output filename. 
+CONOUT_FILENAME:	DB	'z80labeltmp'		; default label file name. 
+CONOUT_FILENAME_CNT:	DB $00,$00,$00,$00
+CONOUT_FILENAME_ALL:	DB $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00
+CONOUT_FILENAME_HND:	DB $00,$00,$00,$00	
+
+CONOUT_BUFFER:
+BLOCK $80				; 128 byte buffer for console messages out - eg, debugging or perhaps label export. 
+
+
 
 LABEL_TABLE:
+		DW		FIRST_LABEL			; Initial Marker.
+		DB		$80+7				; Mark as a special label. (Group Label)
+		DB		'XSYSTEM'			; Special label is a marker.
+		DW		LABEL_TABLE_USER	; And the end of the marked group is the User Label Table. 
+
+FIRST_LABEL:
 		DW		LABEL_TABLE_PC_OFF	; Vector to the next label. 
 		DB		5					; 15 characters in the label 'Program Counter'. 
 		DB		'ORGPC'	; The label itself - An alternative way to address the Program Counter
 PC:		DW		$0000				; Install the program counter into the label table so the program can access it directly as a variable or constant. 
 
 LABEL_TABLE_PC_OFF:
-		DW		LABEL_TABLE_WRITELOC
+		DW		LABEL_TABLE_WRITELOC	; Where are wr writing to memory - PC offset. Added to PC to store byte location.
 		DB		5
 		DB		'PCOFF'
 PC_OFFSET:		DW		$0000				; PC Offset. 
 
 LABEL_TABLE_WRITELOC:
-		DW		LABEL_TABLE_PASS
+		DW		LABEL_TABLE_PASS		; PC Write Location - ORGPC + PCOFF - Do not modify. Read for reference only. 
 		DB		5
 		DB		'XWLOC'
 WRITE_ADDR_STORE: DW	$0000		; Where are we writing to? (PC + OFFSET)
 
 LABEL_TABLE_PASS:
-		DW		LABEL_TABLE_PASS2	
+		DW		LABEL_TABLE_PASS2	; Which pass are we making? Global or Local? 
 		DB		5
 		DB		'XPASS'
 PASS:	DB		$00		; Low order byte is which pass we're writing.
 GPASS:	DB		$00		; High order byte is the global pass ( local file pass plus global pass ). 
 
 LABEL_TABLE_PASS2:
-LABEL_BASE:		DW		LABEL_TABLE_ARG1		; We label this as LABEL BASE because we may change this to bypass root and higher level tables
+		DW		LABEL_TABLE_ARGC		; We label this as LABEL BASE because we may change this to bypass root and higher level tables
 		DB		5
-		DB		'SYSFL'						; System Flags
-		DB		$00		; Are we making a super-pass? ( Super Pass is a pass called for a module. Has no relevance to PASS or GPASS but can affect wherther a pass completes )
-		DB		$00		; Undefined higher order byte at present. 
+		DB		'LBASE'						; System Flags
+LABEL_BASE:		DW		$0000		; Are we making a super-pass? ( Super Pass is a pass called for a module. Has no relevance to PASS or GPASS but can affect wherther a pass completes )
+									; Undefined higher order byte at present. 
+
+LABEL_TABLE_ARGC:
+LABEL_ARG1:		DW		LABEL_TABLE_ARG1
+		DB		4
+		DB		'ARGC'
+VARGC:	DW		$0000	; No value.
+
 
 LABEL_TABLE_ARG1:
 LABEL_ARG2:		DW		LABEL_TABLE_ARG2
@@ -5876,14 +6414,55 @@ LABEL_ARG3:		DW		LABEL_TABLE_ARG3
 		DB		4
 		DB		'ARG2'
 VARG2:	DW		$0002	; No value.
-		
+
 LABEL_TABLE_ARG3:
-LABEL_USER:		DW		LABEL_TABLE_USER
+LABEL_ARG4:		DW		LABEL_TABLE_ARG4
 		DB		4
 		DB		'ARG3'
-VARG3:	DW		$0003	; No value.		
-		
+VARG3:	DW		$0003	; No value.
 
+LABEL_TABLE_ARG4:
+LABEL_ARG5:		DW		LABEL_TABLE_ARG5
+		DB		4
+		DB		'ARG4'
+VARG4:	DW		$0004	; No value.
+
+LABEL_TABLE_ARG5:
+LABEL_ARG6:		DW		LABEL_TABLE_ARG6
+		DB		4
+		DB		'ARG5'
+VARG5:	DW		$0005	; No value.
+
+LABEL_TABLE_ARG6:
+LABEL_ARG7:		DW		LABEL_TABLE_ARG7
+		DB		4
+		DB		'ARG6'
+VARG6:	DW		$0006	; No value.
+
+LABEL_TABLE_ARG7:
+LABEL_ARG8:		DW		LABEL_TABLE_ARG8
+		DB		4
+		DB		'ARG7'
+VARG7:	DW		$0007	; No value.
+
+LABEL_TABLE_ARG8:
+LABEL_ARG9:		DW		LABEL_TABLE_ARG9
+		DB		4
+		DB		'ARG8'
+VARG8:	DW		$0008	; No value.
+		
+LABEL_TABLE_ARG9:
+LABEL_USER:		DW		MACRO_NEST	; Final link to the User Label Table. 
+		DB		4
+		DB		'ARG9'
+VARG9:	DW		$0009	; No value.		
+		
+MACRO_NEST:
+		DW		LABEL_TABLE_USER
+		DB		5
+		DB		'XNEST'
+IN_MACRO:	DB	$00				; Macro nesting level.
+UNSET:	DB	$00
 									; And set where the non-system labels will go.
 LABEL_TABLE_USER:	DB	$00,$00		;'This is the user label table start 
 
