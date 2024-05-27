@@ -18,13 +18,12 @@
 
 ;
 ; CALL format. LASM INFILE.ASM OUTFILE.COM /A/B/C/d/e/f/g/ etc. 
-; /D debug - Deprecated - I can recompile it to show this.
 ; /H - Output file is in Intel Hex format
 ; /I - Ignore errors. Attempt to continue from the point we started... If necessary keep throwing up more errors. Not implemented yet. 
 ; /P - PRN output format ( note, uses CR without line feed to store line details. )
 ;      PRN Format LLLLL MMMM AA BB CC DD INSTRUCTIONS - Line, Memory, DATA DATA DATA Opcodes. 
-; /F - Output screen responses to ASM.TXT instead of the console. 
-; 
+; /C - Output screen responses to CONSOLE.TXT instead of the console. 
+; /D - Disable output. Unless overwritten by source. 
 ; 
 ;
 ; Synopsis - This routine reads the source a byte at a time, and loads the next "symbol" to be decoded into the buffer at BUFFER. Buffer is a 256 byte space with the first digit being the character count
@@ -35,32 +34,26 @@
 ; Once the buffer is filled it can be compared to a pre-existing string pointed to by DE via TESTLOOP which will return a Z if the string matches. 
 
 ; To Add
-; 1. Warnings - Set "End Of PC" alert.
+; 1. Warnings - Set "End Of PC" alert. Alerts on overflow. DONE!
 ; 2. Set Notices to print to console. DONE!
-; 3. Add simple macros.
-; 4. Write external routine to show all labels.... ( Debug Toolkit ). Can be run post-assembly. 
+; 3. Add simple macros. DONE!
+; 4. Write external routine to show all labels.... ( Debug Toolkit ). Can be run post-assembly. INTERNAL NOW _ DONE!
 ; 5. Hex output option. ( Binary or Hex. ). DONE!
-; 6. Show all errors DEBUG
+; 6. Show all errors DEBUG DONE!
 ; 7. SERIOUS ISSUE - Need to modify ADD_LABEL to set an upper limit on the label table.  DONE!
-; 8. Include ASM
-; 9. Include BIN
-; 10. Add warnings for bit transfers etc.
-; 11. Warnings for z80
-; 12. Warnings for Undocumented?
-; 14. Big One - The ability to de-table Labels. So local and global.... 
-; 15. Add support for "Subroutines" like "includes" but within the main code. 
-; eg, DefFn Print
-;	    ~VARIABLE: 
-;       EQU ~VARIABLE,$00 
-;     	
-;  Will allow the variables in the table to be removed when it hits EndFn or and INCX; Include Exit. 
-; OK, Don't know if this is possible... Will be challenging. Install pass 1, delabel pass 2. 
-; Strategy - Two passes on include code, one on include data in the first pass. 
-; Option for Four Passes maybe if it gets too iterative...  With a switch? Maybe three passes. One for pass 1, Two for Pass 2. <--- Seems to work if we delabel...
-; OR ... I prepend the routine name to the labels...  ~ROUTINE_LABEL and =ROUTINE_LABEL for clean up.... Keep and clean =ROUTINE_LABEL to LABEL. 
-; More thinking needed - Maybe just leave it all in place. 
-; 16. Move system variables - eg, PC or IP, to Variables so I can reference them as a system label - eg , LD HL,PC ; Will load HL with the current PC. 
-; 17. TARGET - Like ORG, but only adjusts OFFSET ( Sets offset to result in the target org )
+; 8. Include ASM DONE!
+; 9. Include BIN DONE!
+; * 10. Add warnings for bit transfers etc. ??? Can't remember what I was thinking of? Is this a variable size issue?
+; 11. Warnings for z80 - Abandoned. 
+; 12. Warnings for Undocumented? Abandoned.
+; 14. Big One - The ability to de-table Labels. So local and global.... DONE! 
+; 15. Add support for "Subroutines" like "includes" but within the main code. DONE!
+; 16. Don't run if no output file specified DONE - Though has issues with trying to recognize switches as second label, which isn't that strange. 
+; 17. Move system variables - eg, PC or IP, to Variables so I can reference them as a system label - eg , LD HL,PC ; Will load HL with the current PC. DONE! XSYSTEM Group. 
+; 18. TARGET - Like ORG, but only adjusts OFFSET ( Sets offset to result in the target org ) Abandoned. Can be Macro. 
+; * 19. Check all commands work.
+; 20. Decimal and Binary message output. DONE!
+; * 21. Write LOKI Macros. 
 ;
 ; Conditional Switches... MUST be before code if conditional assembly used.
 EQU	DEBUG,$00
@@ -228,23 +221,40 @@ OPEN_SOURCE:
 				
 				RET
 				
-OPEN_DEST:
+OPEN_DEST:								; Open the output file for the code/hex output. 
 				LD		A,(DRY)
 				OR		A
 				RET		NZ				; If it's a dry write, don't even open the output file... 
 				
 				LD      DE,OUTPUT_FCB         ; We want to use the first FCB populated by the CCP. 
-				LD      C,Make_File     ; Open File.
-				CALL    BDOS			; 			Get the first matching file.
+				JP		OPEN_OUTPUT_FILE
+				
+;				LD      C,Make_File     ; Open File.
+;				CALL    BDOS			; 			Get the first matching file.
+;
+;				AND		$FC					; Any errors?
+;				JP		NZ,OPENDEST_ERROR				
+;
+;				LD		A,(OUTPUT_FCB+1)
+;				CP		$20
+;				JP		Z,OPENDEST_ERROR	; Make sure we got a filename.... 
+;
+;				RET	
 
-				AND		$FC					; Any errors?
-				JP		NZ,OPENDEST_ERROR				
+OPEN_OUTPUT_FILE:							; Create a new file entry in BDOS.
+											; Call with DE pointing to FCB.
+		PUSH	DE
+		POP		HL
+		INC		HL
+		LD		A,(HL)
+		CP		$20		; Is it space?
+		JP		Z,OPENDEST_ERROR			; A destination file error - No filename specified.
+		LD		C,Make_File
+		CALL	BDOS
+		AND		$FC
+		JP		NZ,OPENDEST_ERROR			; Did we not get a valid result in A?
+		RET									; Otherwise the file was opened OK. 
 
-				LD		A,(OUTPUT_FCB+1)
-				CP		$20
-				JP		Z,OPENDEST_ERROR	; Make sure we got a filename.... 
-
-				RET	
 
 ;OPEN_BINC:
 ;				LD		DE,BINCLUDE_FCB
@@ -531,11 +541,22 @@ PRINTDECVAL:
 			POP		DE				; Then drop through and print the string pointed to by DE
 			
 PRINTSTRING:
-			LD	C,Print_String
-			CALL	BDOS
-			ret
+		LD		A,(CONFILE)
+		OR		A
+		JR		NZ,PRINTSTRING_TO_FILE
+		LD		C,Print_String
+		CALL	BDOS
+		ret
 
-
+PRINTSTRING_TO_FILE:				; Like Print_String BDOS option, but to the file. 
+		LD		A,(DE)
+		CP		'$'
+		RET		Z					; only continue until we hit the $ symbol.
+		PUSH	DE
+		CALL	PRINTCHAR			; Print the character.
+		POP		DE
+		INC		DE
+		JR		PRINTSTRING_TO_FILE
 			
 			
 			
@@ -574,6 +595,8 @@ SWITCH_NODECB:	LD		A,(HL)
 				JR		Z,HEX_ON
 				CP		'D'
 				JR		Z,BE_DRY
+				CP		'C'
+				JR		Z,CONSOLE_FILE		; Write the console output to a file. 
 				RET
 				
 HEX_ON:
@@ -586,6 +609,14 @@ BE_DRY:
 				LD		(DRY),A				; Do not write output file.
 				RET
 
+CONSOLE_FILE:	LD		DE,CONOUT_FCB		; We want to write everything that is headed for the screen to the console. Except string messages maybe. 
+				CALL	OPEN_OUTPUT_FILE	; Open the console output file.
+				LD		A,$FF
+				LD		(CONFILE),A			; And make for CONSOLE OUT to a file ( or other ??? )
+				LD		HL,CONOUT_BUFFER
+				LD		(CONPTR),HL			; Store the pointer to the console out buffer. 
+				RET
+				
 ;################ A lot of standard errors below. Anything to ERROR_OUT will dump the stack, restore pre-run
 ; state and exit the system.
 
@@ -638,6 +669,19 @@ ERROR_OUT_NOMACRO:							; We just here if there's no macro information to displ
 ;				HALT		
 			
 NO_ERROR_OUT:									; Or we can exit directly via here. 
+				LD		A,(CONFILE)
+				OR		A
+				JR		Z,NO_ERROR_OUT_NOCONSOLE	; Check if we need to close the console file. 
+				LD		DE,CONOUT_BUFFER
+				LD		C,SET_DMA_ADDRESS
+				CALL	BDOS				; Set the DMA to the console output buffer. 
+				LD		DE,CONOUT_FCB
+				LD		C,Write_Sequential
+				CALL	BDOS
+				LD		DE,CONOUT_FCB
+				LD		C,Close_File
+				CALL	BDOS				; Do we need to write the console to the file? Might be worth trying. Close the file. 
+NO_ERROR_OUT_NOCONSOLE:
 				LD		HL,(STACK_SAVE)			; We've messed up the stack. Fix it up before we leave. 
 				LD		SP,HL
 RST 0
@@ -1096,20 +1140,49 @@ TEST_MSG:								; Send the remainder of the line to the console,
 		POP		HL						; Waste the return address
 		RET								; And Return
 
+
 TEST_SHEX:								; Show Hex. 
 		LD		DE,SHEX
 		CALL	TESTLOOP
 		RET		NZ
 		CALL	GETWORD_TO_END
 		CALL	EVAL
+
 		LD		HL,(VALUE)
 		CALL	PRINTHEX16
 ;		CALL	CRLF
-		POP		HL
+
+		POP		HL						; And exit. 
 		RET
 
 TEST_SDEC:
+		LD		DE,SDEC
+		CALL	TESTLOOP
+		RET		NZ
+		CALL	GETWORD_TO_END
+		CALL	EVAL
+
+		LD		HL,(VALUE)
+		CALL	PRINTDEC16
+;		CALL	CRLF
+
+		POP		HL						; And exit. 
+		RET
+
 TEST_SBIN:
+		LD		DE,SBIN
+		CALL	TESTLOOP
+		RET		NZ
+		CALL	GETWORD_TO_END
+		CALL	EVAL
+
+		LD		HL,(VALUE)
+		CALL	PRINTBIN16
+;		CALL	CRLF
+
+		POP		HL						; And exit. 
+		RET
+		
 TEST_SCR:
 		LD		DE,SCR
 		CALL	TESTLOOP
@@ -1444,7 +1517,7 @@ SET_BLOCK:
 		JR		Z,BLOCK_EXIT			; Zero block size = no bytes.
 		
 SET_BLOCK_COUNT:
-		LD		A,$00					; Just zero the bytes 
+		LD		A,(BLOCK_CHARACTER)			; System Label BLOCK_CHAR defines what character is written. 
 		PUSH	BC
 		CALL	WRITEBYTE				; Make sure this NEVER uses BC. 
 		POP		BC
@@ -1984,8 +2057,8 @@ TEST_INSTRUCTIONS:
 		CALL	TEST_ORG			; ORG instructions will affect the code base. Offset doesn't - Offset only changes where the code goes.
 		CALL	TEST_MSG			; Messages to the console...  
 		CALL	TEST_SHEX			; Show any hex? 
-;		CALL	TEST_SDEC			; Show Decimal
-;		CALL	TEST_SBIN			; Show binary?
+		CALL	TEST_SDEC			; Show Decimal
+		CALL	TEST_SBIN			; Show binary?
 		CALL	TEST_SCR			; Show any Carriage Returns?
 		CALL	TEST_OFFSET			; Are we assembling to a different location?
 		CALL	TEST_END			; Have we reached the stated EOF before the physical EOF?
@@ -5046,10 +5119,11 @@ ERR_MACRO:				DB	'Macro already exists$'
 ERR_MEND:				DB	'Macro never ends$'
 ERR_ZEROSIZE:			DB	'Zero size not permitted$'
 ERR_BUFFER_OVERFLOW:	DB	'Line segment too big$'
-ERR_LABEL_OVERFLOW:		DB	$0D,$0A,'Out Of Memory$'
-ERR_TOO_MANY_ARGS:		DB	$0D,$0A,'Too many Macro arguments$'
-ERR_TOO_MANY_NESTS:		DB	$0D,$0A,'Too many nests$'
-ERR_FORCED_FATAL:		DB	$0D,$0A,'Source forced fatal error$'
+ERR_LABEL_OVERFLOW:		DB	'Out Of Memory$'
+ERR_TOO_MANY_ARGS:		DB	'Too many Macro arguments$'
+ERR_TOO_MANY_NESTS:		DB	'Too many nests$'
+ERR_FORCED_FATAL:		DB	'Source forced fatal error$'
+ERR_PC:					DB	'Program Counter Overflow$'
 NOERRORS:				DB	$0D,$0A,'NO errors encountered. Assembly Completed.$'
 		
 
@@ -5087,10 +5161,37 @@ HEXCONV1:
 PRINTCHAR:							; We can redirect here if necessary...  BDOS character output. 
 		LD		E,A
 PRINTCHARE:							; Enter with E set instead of A. 
+		LD		A,(CONFILE)
+		OR		A
+		JR		NZ,PRINTCHAR_ALT
+
 		LD		C,Console_Output
 		CALL	BDOS
 		RET
 
+PRINTCHAR_ALT:
+		LD		HL,(CONPTR)			; Let's locate the console file buffer.
+		LD		(HL),E				; Save the character to the console buffer.
+		INC		HL
+		LD		(CONPTR),HL			; Move the buffer pointer along.
+		LD		DE,CONEND
+		OR		A
+		SBC		HL,DE
+		LD		A,H
+		OR		L
+		RET		NZ					; We still have buffer to spare, so exit.
+		LD		HL,CONOUT_BUFFER
+		LD		(CONPTR),HL			; Otherwise update the pointer back to the start of the buffer.
+		
+		LD		DE,CONOUT_BUFFER	; Make sure the DMA location is the console buffer. 
+		LD		C,SET_DMA_ADDRESS
+		CALL	BDOS
+		
+		LD		DE,CONOUT_FCB
+		LD		C,Write_Sequential
+		CALL	BDOS				; And write the buffer. 
+		RET
+		
 PRINTCHAR_TEMP:	DB	$00	; Temp store		
 PRINT_DEBUG_CHAR:						; Debug to show what we're getting.
 		LD	(PRINTCHAR_TEMP),A		; PReserve the character in A
@@ -5138,7 +5239,29 @@ PRINTDEC8:								; Print 8 bit integer.
 		LD		L,A
 		LD		H,$00
 		JR		PRINTDEC8_ENTRY
-		
+	
+
+PRINTBIN16:								; Print Binary Number
+		LD		B,16
+		JR		PRINTBIN_LOOP
+PRINTBIN8:
+		LD		H,A						; If 8 bit, will be in A instead of HL
+		LD		B,8
+PRINTBIN_LOOP:
+		RL		L
+		RL		H
+		PUSH	HL
+		LD		E,'0'
+		JR		NC,PRINTBIN_ZERO
+		INC		E
+PRINTBIN_ZERO:
+		PUSH	BC
+		CALL	PRINTCHARE
+		POP		BC
+		POP		HL
+		DJNZ	PRINTBIN_LOOP
+		RET
+	
 		
 		
 ;;;;; Evaluate an expression, or an operator on the current expression. 
@@ -5635,17 +5758,23 @@ WRITEBYTE:
 
 ;LD	(HL),A 	  							; TEST. Don't write during Pass1 and don't write direct to memory unless switch is on. 
 
+		LD		A,(WET)
+		OR		A
+		JR		NZ,WRITE_BYTE_FORCE_WET		; If the Wet Write value is not zero, force writing of code. Supports non-linear HEX output. 
+
 		LD		A,(PASS)
 		CP		$01
 		JR		Z,DRY_WRITE				; If in local pass1, don't write anything. 
 		LD		A,(GPASS)
 		CP		$01
 		JR		Z,DRY_WRITE				; or if in Global pass 1, don't write anything. 
+
+
+WRITE_BYTE_FORCE_WET:						; Might jump here if the code requires a forced write - eg, Single pass enforced or Global Pass 1 includes. 	Dry overrides. 
 		LD		A,(DRY)
 		OR		A
 		JR		NZ,DRY_WRITE			; or we said not to write a file.
-
-		
+	
 		LD		A,(INTELFORMAT)
 		OR		A
 		JR		NZ,INTELHEX				; If this is set, HEX format output.
@@ -5663,14 +5792,19 @@ DRY_WRITE:								; In case we didn't really write it.
 		LD		HL,(PC)					; Now step PC forward
 		INC		HL
 		LD		(PC),HL					; And store the byte since it's a list. 
-					
+		CALL	CHECKPC					; Make sure we didn't wrap at FFFF			
 IFNZ	DEBUG
 		CALL	WRITEBYTE_SHOWBYTE
 ENDIF
 		
 		RET
 		
-		
+CHECKPC:
+		LD		A,H
+		OR		L
+		RET		NZ
+		LD		DE,ERR_PC
+		JP		ERROR_OUT
 
 IFNZ DEBUG
 ; Do we want to show what we're writing? (DEBUG mode)
@@ -6025,8 +6159,7 @@ SHOW_LABEL_LAST:	DW	$0000	; If it's a group, the address of the last label we wa
 SHOW_CHAR:			; Show a character
 	PUSH	HL
 	PUSH	BC
-	LD		C,Console_Output
-	CALL	BDOS
+CALL PRINTCHARE
 	POP		BC
 	POP		HL
 	RET
@@ -6066,8 +6199,9 @@ SHOW_GROUP:								; Enter this with a group label in buffer.
 
 	PUSH	DE							; Show a closed group. ( So it's obvious the labels aren't being called. )
 	LD		DE,SHOW_GROUP_NOTICE
-	LD		C,Print_String
-	CALL	BDOS
+;	LD		C,Print_String
+;	CALL	BDOS
+	CALL	PRINTSTRING
 	POP		DE
 	
 	JR		SHOW_GROUP_CLOSED			; Return point for closed group. 
@@ -6269,6 +6403,8 @@ OPCODES:			DW		$0000			; How many opcodes did we write?
 
 CONDITIONAL:		DB		$00				; While this is $00, process instructions. Don't change this until we get the directive IFEND							
 DRY:			DB		$00					; If not zero, dry write always. ( never write code )
+CONFILE:			DB	$00					; Write the console output to the file. 
+CONPTR:				DW	$0000				; Console Pointer.
 
 ;IN_MACRO:			DB		$00				; Flag - When I'm in a MACRO, this should be non-zero. Indicates program bytes should be pulled from the macro. 00= not in macro. 
 											; I'll just increase it by 1 for each iteration of a macro, so macros can call macros. 
@@ -6348,14 +6484,27 @@ BINCLUDE_BUFFER:
 BLOCK $80				; 128 byte buffer for binary input. 
 
 CONOUT_FCB:			DB	$00				; Current drive default. 		Console output filename. 
-CONOUT_FILENAME:	DB	'z80labeltmp'		; default label file name. 
+CONOUT_FILENAME:	DB	'CONSOLE TXT'		; default label file name. 
 CONOUT_FILENAME_CNT:	DB $00,$00,$00,$00
 CONOUT_FILENAME_ALL:	DB $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00, $00,$00,$00,$00
 CONOUT_FILENAME_HND:	DB $00,$00,$00,$00	
 
 CONOUT_BUFFER:
 BLOCK $80				; 128 byte buffer for console messages out - eg, debugging or perhaps label export. 
+CONEND:					; Mark the end of the buffer. 
 
+CHECKPOINT:				; Maintained for testing only. Should not be called in production code. 
+		PUSH	AF
+		PUSH	DE
+		PUSH	BC
+		PUSH	HL
+		LD		E,'#'
+CALL PRINTCHARE
+		POP		HL
+		POP		BC
+		POP		DE
+		POP		AF
+		RET
 
 
 LABEL_TABLE:
@@ -6390,11 +6539,19 @@ PASS:	DB		$00		; Low order byte is which pass we're writing.
 GPASS:	DB		$00		; High order byte is the global pass ( local file pass plus global pass ). 
 
 LABEL_TABLE_PASS2:
-		DW		LABEL_TABLE_ARGC		; We label this as LABEL BASE because we may change this to bypass root and higher level tables
+		DW		LABEL_TABLE_SYSTEM		; We label this as LABEL BASE because we may change this to bypass root and higher level tables
 		DB		5
 		DB		'LBASE'						; System Flags
 LABEL_BASE:		DW		$0000		; Are we making a super-pass? ( Super Pass is a pass called for a module. Has no relevance to PASS or GPASS but can affect wherther a pass completes )
 									; Undefined higher order byte at present. 
+
+LABEL_TABLE_SYSTEM:	
+		DW		LABEL_TABLE_ARGC		; We label this as LABEL BASE because we may change this to bypass root and higher level tables
+		DB		5
+		DB		'XSYST'				; System Flags and Counts.
+BLOCK_CHARACTER:	DB 	$00			; Write this character when using BLOCK command. 
+WET:	DB		$00					; WET writes (Always force output writes, regardless of other Assembler directives). 
+
 
 LABEL_TABLE_ARGC:
 LABEL_ARG1:		DW		LABEL_TABLE_ARG1
