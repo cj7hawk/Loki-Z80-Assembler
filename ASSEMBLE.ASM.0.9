@@ -1,4 +1,3 @@
-arithmetic:
 ;z80 Assembler - To work and assemble z80 code within the LOKI environment. 
 ;
 ; Note currently trying to evaluate - And process multiple same operators - eg, 123<<<<
@@ -22,21 +21,19 @@ arithmetic:
 ; /H - Output file is in Intel Hex format
 ; /I - Ignore errors. Attempt to continue from the point we started... If necessary keep throwing up more errors. Not implemented yet. 
 ; /P - PRN output format ( note, uses CR without line feed to store line details. )
-;      PRN Format LLLLL MMMM AA BB CC DD INSTRUCTIONS - Line, Memory, DATA DATA DATA Opcodes. Not implemented yet. 
-; /O - PRN Format for ALL assembly, including other passes. Show pass level. 
+;      PRN Format LLLLL MMMM AA BB CC DD INSTRUCTIONS - Line, Memory, DATA DATA DATA Opcodes. 
 ; /C - Output screen responses to CONSOLE.TXT instead of the console. 
-; /D - Disable output. Unless overwritten by source. ( ie, the named output file does NOT get written ).
-;
+; /D - Disable output. Unless overwritten by source. 
 ; 
 ;
-; Synopsis - This routine reads the source a byte at a time, and loads the next "symbol" to be decoded into the buffer at BUFFER. Buffer is a 128 byte space with the first digit being the character count
+; Synopsis - This routine reads the source a byte at a time, and loads the next "symbol" to be decoded into the buffer at BUFFER. Buffer is a 256 byte space with the first digit being the character count
 ; The Buffer is loaded by routines GETWORD_TO_WS and GETWORD_TO_END. The difference is;
 ;   GETWORD_TO_WS reads through whitespace until it hits a character. Then it reads the characters into buffer until it hits an operator or whitespace. or EOL or EOF. 
 ;   GETWORD_TO_END is as GETWORD_TO_WS but will also ignore whitespace after characters until it hits an operator or EOL or EOF
 ; Any listed operators it encounters ( it won't encounter more than 1 ) are loaded into the Variable "OPERATOR" except for special operators, which are not recorded or remembered.
 ; Once the buffer is filled it can be compared to a pre-existing string pointed to by DE via TESTLOOP which will return a Z if the string matches. 
 
-; Stuff still to Add
+; To Add
 ; 1. Warnings - Set "End Of PC" alert. Alerts on overflow. DONE!
 ; 2. Set Notices to print to console. DONE!
 ; 3. Add simple macros. DONE!
@@ -47,31 +44,18 @@ arithmetic:
 ; 8. Include ASM DONE!
 ; 9. Include BIN DONE!
 ; * 10. Add warnings for bit transfers etc. ??? Can't remember what I was thinking of? Is this a variable size issue?
-; I think it was when a 16 bit value ( above 255 ) is used for an 8 bit assignment. In the end I just use 8 bits. 
-; 11. Warnings for z80 (ie, not 8080 compatible? ) - Abandoned. 
+; 11. Warnings for z80 - Abandoned. 
 ; 12. Warnings for Undocumented? Abandoned.
 ; 14. Big One - The ability to de-table Labels. So local and global.... DONE! 
 ; 15. Add support for "Subroutines" like "includes" but within the main code. DONE!
 ; 16. Don't run if no output file specified DONE - Though has issues with trying to recognize switches as second label, which isn't that strange. 
 ; 17. Move system variables - eg, PC or IP, to Variables so I can reference them as a system label - eg , LD HL,PC ; Will load HL with the current PC. DONE! XSYSTEM Group. 
 ; 18. TARGET - Like ORG, but only adjusts OFFSET ( Sets offset to result in the target org ) Abandoned. Can be Macro. 
-; * 19. Check all commands work. (Forever Ongoing) Need a standard test file. Part Done. Need to make it work on both platforms. 
+; * 19. Check all commands work.
 ; 20. Decimal and Binary message output. DONE!
 ; * 21. Write LOKI Macros. 
-; 22. Add PRN output support. ( current )
-; 23. Ability to delete Labels or Groups ( Labels are done ! )
-; Debug is set up with conditional assembly and provides details on how the assembler is working as it assemblers. It is VERY VERY verbose. 
-; DEBUG code only installed if DEBUG is $FF. Must be assembled in. Does not otherwise alter assembler function. DEBUG will be written to the console, so can also be
-; Written to the Console File with the correct switch. 
 ;
-; Need to add target ( to adjust offset ) - Added. 
-; Need to support ? operator ( peek at memory ).
-; Need to precent swapping groups that are not groups (eg, labels ). 
-; 12/2/2025 removed MODULES, MODID, MODCN, etc. Removed temporary labels. Groups are working now for modules.
-; 14/02/2025 added RORG and REND - for RelocatableORG and RelocatableEND - Changes where the PC thinks ORG is, but continues with 
-;   		the previous ORG in memory.
-; 			Added Memory to PRN output. 
-
+; Conditional Switches... MUST be before code if conditional assembly used.
 EQU	DEBUG,$00
 
 
@@ -161,7 +145,7 @@ OPEN_ASSEMBLY:
 				JP		NO_ERROR_OUT	; Restore the stack and exit. 
 
 
-BDOS:				; BDOS intercept to allow operation on other platforms.  Just add screen/file/etc code here. 
+BDOS:				; BDOS intercept to allow operation on other platforms. 
 	PUSH	HL
 	PUSH	BC
 	CALL	BDOS0005	
@@ -169,37 +153,50 @@ BDOS:				; BDOS intercept to allow operation on other platforms.  Just add scree
 	POP		HL
 	RET
 
-PC_STORE:		DW	$0000				; If we make 2 passes here, we need to remember the starting PC for the second pass. 
-ONE_MORE_TIME:	DW	$0000				; While 00 then just 1 pass. If it's zero or one, doesn't matter. 				
-MAKE_2_PASSES:									; A module has been included, will usually be ONE pass unless modified.
-				XOR		A						; Always start to run the same passes as the calling GPASS. 
+ONE_MORE_TIME:	DW	$00					; While 00 then just 1 pass. If it's zero or one, doesn't matter. 				
+MAKE_2_PASSES:
+;				LD		A,$01
+;				LD		(SUBPASS),A
+
+				XOR		A
 				LD		(ONE_MORE_TIME),A		; Clear the extra pass flag. ( well, byte ). The pass will set it if relevant. 
-				LD		A,(GPASS)				; Set to be the same as GPASS.
-				LD		(PASS),A				; Set the first pass to be the same as the Global Pass.
-	
-				LD		HL,(PC)
-				LD		(PC_STORE),HL			; Store the PC we have when we start the included module. 
-				CALL	MAKE_PASS				; The PASS is set, but a module can change this.
+
+				LD		A,(GPASS)
+				LD		(PASS),A		; Set the first pass to be the same as the Global Pass.
+
+				CALL	MAKE_PASS
 				
 				LD		A,(PASS)
 				CP		$02
 				RET		Z				; Exit if the first pass was actually the second pass. No need to make a third. 
 				
-				LD		A,(ONE_MORE_TIME)		; Now we check if the module requested a second pass. 
-				OR		A						;
-				RET		Z						; And we also exit if we're not doing one more pass.
+				LD		A,(ONE_MORE_TIME)
+				OR		A
+				RET		Z				; And we also exit if we're not doing one more pass.
 				
-				LD		A,$02			; OK, we're making a second pass it seems. 	
+;				LD		A,$02
+;				LD		(SUBPASS),A
+
+				LD		A,$02
 				LD		(PASS),A		; But if we're going to make a second pass, make sure it's pass 2. 
-				LD		HL,(PC_STORE)	; Recover the PC from the start. 
-				LD		(PC),HL			; And let's also make sure it starts with the same PC, since we've done it once already.
-				CALL	MAKE_PASS		; And make a second pass !
-										; Technically, even a second pass can request two passes again.... But mostly this would be 
-				RET						; the first pass where the second pass happens. 
+				CALL	MAKE_PASS
+
+				RET
+
+;MAKE_PASS_1:
+;				CALL	INIT_VARS
+;				CALL	OPEN_SOURCE		; Open the source code file - And read the first sector. 
+;				CALL	OUTPUT_RESET	; Reset(SET) the counters for the output file before Pass 1 starts.  			
+;				CALL	PASS1			; Build table of labels. 
+;				RET
+;				
+;MAKE_PASS_2:
+;				CALL	INIT_VARS
+;				CALL	OPEN_SOURCE				
+;				CALL	PASS2	
+;				RET
 
 
-
-; FILE OPENING ROUTINES.
 
 OPEN_AND_TEST:
 				PUSH	DE
@@ -339,8 +336,6 @@ HEX_TO_FILE:							; Like Byte to File but writes HEX codes.
 		CALL	BYTE_TO_FILE			; Write to the file
 		RET
 
-
-
 BYTE_TO_FILE:								;Sequential Byte by Byte. This routine writes bytes to the output file. 
 				LD		HL,(OUTPUT_PTR)
 				LD		(HL),A
@@ -368,8 +363,7 @@ PASS2_CLEAR_FCB:
 				DJNZ	PASS2_CLEAR_FCB		; Clear the file FCB. 
 
 				LD		HL,$0000
-				XOR		A		
-				LD 		(PC_OFFSET),HL	; Default offset is zero until set by the code. 
+				XOR		A				
 				LD 		(LINE_NUMBER),HL
 				LD		(LINES),HL
 				LD		(LABELS),HL
@@ -379,8 +373,6 @@ PASS2_CLEAR_FCB:
 				LD		(CONDITIONAL),A		; Clear any conditional blocks to assembly. 
 				DEC		A			; Make A FF
 				LD		(EOL),A		; Set for EOL since we want to trigger a line change from 0 to 1 on first read. 
-				LD		HL,$0100
-				LD		(PC),A		; Default PC is $0100. 
 				RET
 
 
@@ -435,8 +427,6 @@ RECURSE_CLEAR_FILENAME:
 				PUSH	HL
 				LD		A,$FF
 				LD		(EOL),A		; Trigger line change for reading first line.
-
-		CALL	SHOW_PRN_OUTPUT ; Let's make a single final pass to show the filename called in PRN OUTPUT. 
 
 				CALL	MAKE_2_PASSES	; Recursive call.
 ;;				CALL	SHOW_STATS		; Neet to upgrade SHOWSTATS to cover the file it's working with. 
@@ -582,7 +572,7 @@ PRINTSTRING_TO_FILE:				; Like Print_String BDOS option, but to the file.
 
 				
 SWITCHES:
-				LD		HL,$0080		; Where the command line exists.
+				LD		HL,$0080		; WHere the command line exists.
 				LD		A,(HL)
 				CP		2				; We need at least 2 characters... More if a filename is present.
 				RET		C				; Return if it's less than 2. 
@@ -607,10 +597,6 @@ SWITCH_NODECB:	LD		A,(HL)
 				JR		Z,BE_DRY
 				CP		'C'
 				JR		Z,CONSOLE_FILE		; Write the console output to a file. 
-				CP		'P'
-				JR		Z,PRNSEL			; Set for PRN output. Show Location, Bytes, Text. 64 bytes max per instruction.
-				CP		'O'
-				JR		Z,PRNOVER			; PRN Override - Show all levels. 
 				RET
 				
 HEX_ON:
@@ -630,18 +616,6 @@ CONSOLE_FILE:	LD		DE,CONOUT_FCB		; We want to write everything that is headed fo
 				LD		HL,CONOUT_BUFFER
 				LD		(CONPTR),HL			; Store the pointer to the console out buffer. 
 				RET
-				
-PRNSEL:			LD		A,$01
-				LD		(PRNOUT),A
-				LD		A,41				; Chars per line from source.
-				LD		(PRNCHARS),A
-				RET	
-				
-PRNOVER:		LD		A,$02				; Override pass2 only output and show ALL levels of assembly. 
-				LD		(PRNOUT),A	
-				LD		A,33				; chars per line from source. 
-				LD		(PRNCHARS),A
-				RET					
 				
 ;################ A lot of standard errors below. Anything to ERROR_OUT will dump the stack, restore pre-run
 ; state and exit the system.
@@ -688,10 +662,10 @@ ERROR_OUT_NOMACRO:							; We just here if there's no macro information to displ
 				CALL 	PRINTBUFFER			; Show the buffer contents. 
 				CALL	SHOW_STATS			; Other closing information. 
 ;				JP ALTERNATE_FAIL				; It's cleaner to do it this way
-;
-;				LD		HL,$0040
-;				LD		DE,$00FF
-;				LD		BC,$AA55				; Signal to emulator to display hex from HL to DE on a halt. 
+
+				LD		HL,$0040
+				LD		DE,$00FF
+				LD		BC,$AA55				; Signal to emulator to display hex from HL to DE on a halt. 
 ;				HALT		
 			
 NO_ERROR_OUT:									; Or we can exit directly via here. 
@@ -765,12 +739,33 @@ PRINTFILENAME_OUT:
 										; Also theres a FCB at LABEL_FCB that holds the file handle for the label data. Labels are slow
 										; so it opens up on the M: RAMDRIVE for better speed.
 										; This pass collects all the labels.
+;PASS:	DB	$00							; Moved to Label Table system variables. 
+																		
+;PASS1:									; Defuct as I call Make Pass now. 
+;				LD		A,$01
+;				LD		(PASS),A			; Record we're on PASS 1. Unknown labels can be ignored here. 
+;				CALL	MAKE_PASS			; Make a pass.
+;
+;				CALL	CRLF					; Note it was completed. In case of anything printed during PASS1, clear a line. 
+;				LD		DE,PASS_1_COMPLETE
+;				CALL	PRINTSTRING
+;				
+;				RET
+;
+;
+;PASS2:								; Now make a serious pass.
+;		LD		A,$02
+;		LD		(PASS),A			; Record we're on PASS 2. Unknown labels can be ignored here. 
+;		
+;		CALL	MAKE_PASS			; Make a pass.
+;		RET
 
 
-; This routine counts the lines of source, whether in the original or included file. 
 LINE_COUNTER:
 				LD		A,(EOL)			; See if we got an EOL from the previous read.... So we can increment line numbers.
 				OR		A
+
+;				JR		Z,PASS1_SAMELINE	; If we didn't get an EOL at the end, we're on the same line, or will encounter it, or didn't read to EOL. 
 				RET		Z					; We don't jump - now we count line numbers in it's own routine, so just exit. 
 				
 				LD		HL,(LINE_NUMBER)	; If we're on a new line, note it, then clear the EOL marker. 
@@ -782,21 +777,28 @@ LINE_COUNTER:
 				LD		(ENTRYNUMBER),A		; Counter for entries in PRINTWORD. (Debugging assist ) DEBUG
 				RET
 				
-; The is the main routine - calling it will generate a pass of the assembler.
-; The system variables GPASS and PASS control how it behaves - eg, whether on PASS1 or PASS2. 
-; This is important, as labels can only be generated on PASS1, and should be there already on PASS2.
-; It also allows called modules to be included recursively, and it is possible to generate code on Global Pass1 
-;  by manipulating the PASS system variable. 
+
 MAKE_PASS:							; Where the actual pass is made. 
 									; Anything I need for all passes here.
-				CALL	INIT_VARS		; Initialise the variables. 
+				CALL	INIT_VARS
 				CALL	OPEN_SOURCE		; Open the source code file - And read the first sector.
 									
 PASS_LOOP:	
-; Update the line count if necessary.
+;				LD		A,(EOL)			; See if we got an EOL from the previous read.... So we can increment line numbers.
+;				OR		A
+;				JR		Z,PASS1_SAMELINE	; If we didn't get an EOL at the end, we're on the same line, or will encounter it, or didn't read to EOL. 
+;				LD		HL,(LINE_NUMBER)	; If we're on a new line, note it, then clear the EOL marker. 
+;				INC		HL
+;				LD		(LINE_NUMBER),HL	; Only increment the line number when we're on a new line so we know what line the next actions occur on. 
+;				XOR		A
+;				LD		(EOL),A				; And clear the marker. 
+;				LD		A,$31				; Set the term counter for 1 so we can see it in DEBUG under PRINTWORD:
+;				LD		(ENTRYNUMBER),A		; Counter for entries in PRINTWORD. (Debugging assist ) DEBUG
+
 				CALL	LINE_COUNTER		; If we're on a new line, update the line counter and the term counter. 
 				
 PASS1_SAMELINE:
+
 		LD	E,$FF				; Read the keyboard once per pass in case of CTRL C or in debug mode, PAUSE. 
 		LD	C,Direct_Console_IO
 		CALL	BDOS
@@ -814,26 +816,15 @@ ENDIF
 		LD	(PREFIX),A
 		LD	(POSTFIX),A
 		LD	(ADDPOST),A
-		LD	HL,(PC)
-		LD	(PCBACKUP),HL	; For PRN lines since it will change before the PRN routines are called. 
-
-		CALL	PRNRESET	; Clear any PRN codes captured.  ( text from source ). 
 
 		CALL	GETWORD_TO_WS	; Get a character from the input file but only up to when new whitespace is encountered. 	
 		LD		A,(BUFFER)
 		LD		HL,OPERATOR
 		OR		(HL)
-		JR		Z,PASS_NO_INSTRUCTION	; Just bypass - We're testing for nothing in the input here... Obviously... 
+		JR		Z,PASS_NOTHINGTODO	; Just bypass testing for nothing... Obviously... 
 				
 		CALL	TEST_INSTRUCTIONS	; Tests and executes Directives, Operations and set Labels. 
-
-PASS_NO_INSTRUCTION:				; We might bypass testing nothing, but we might still want to print it. 
-		LD		A,(PASS)
-		LD		HL,PRNOUT
-		OR		(HL)
-		DEC		A
-		JR		Z,PASS_NOTHINGTODO	; Will show PRN for PASS=02 on /P and will show for ALL on /O
-		CALL	SHOW_PRN_OUTPUT
+				
 PASS_NOTHINGTODO:
 		LD		A,(EOF)
 		OR		A
@@ -841,136 +832,6 @@ PASS_NOTHINGTODO:
 
 		RET							; Or return from the pass call here. 
 
-SHOW_PRN_OUTPUT:
-		LD		A,(PRNOUT)
-		OR		A
-		RET		Z						; Only show this if we have PRNOUT flagged. 
-		CALL	PRINTLINE				; Print some status information for each pass to the console. Except null lines. 
-		CALL	PRINTCODE				; Print any code that was assembled. 
-		CALL	PRNSOURCE				; Print any source that was included to End Of Screen.
-		CALL	CRLF					; And print a new line. 
-		CALL	PRNRESET
-		ret
-	
-PCBACKUP: DW $0000 					; PC backup... Because we change it before we write the PRN. 
-PRINTCODE:
-		CALL	PRINTSPACE			; Show where in actual memory the bytes are going. 
-		LD		DE,(PCBACKUP)
-		LD		HL,(PC_OFFSET)
-		ADD		HL,DE
-		EX		DE,HL
-		CALL	DEHEXPRINT
-		
-		CALL	PRINTSPACE
-		LD		DE,(PCBACKUP)
-		CALL	DEHEXPRINT
-		CALL	PRINTSPACE
-		LD		C,5					; We'll print 5 charactes anyway.
-		LD		A,(PREFIX)
-		OR		A
-		JR		Z,PRINTCODE_NOPREFIX
-		CALL	PRINTHEX
-		DEC		C					; Remove a byte from the count. 
-PRINTCODE_NOPREFIX:
-		LD		HL,COMMAND
-		LD		B,(HL)
-		LD		A,(HL)				; Test for zero, and bypass all characters of zero. 
-		OR		A
-		JR		Z,PRINTCODE_PADDING
-		INC		HL					; Start of command. 
-PRINTCODE_LOOP:
-		PUSH	BC
-		PUSH	HL
-		LD		A,(HL)
-		CALL	PRINTHEX				; Write the opcodes for the instruction here... 
-		POP		HL
-		INC		HL
-		POP		BC
-		DEC		C
-		DJNZ	PRINTCODE_LOOP
-
-		LD		A,(ADDPOST)				; Sometimes we add this to the end instead of swapping as above. 
-		OR		A
-		JR		Z,PRINTCODE_PADDING		; And exit if there's nothing left to print.. 	
-		LD		A,(POSTFIX)
-		CALL	PRINTHEX				; But if we still need to, add it on here.
-
-PRINTCODE_PADDING:
-; Print C spaces.
-		LD		B,C
-PRINTCODE_PADLOOP:
-		PUSH	BC
-		CALL	PRINTSPACE
-		CALL	PRINTSPACE				; Double space. 
-		POP		BC
-		DJNZ	PRINTCODE_PADLOOP
-;		LD		A,'#'					; Source divider?
-;		CALL	PRINTCHAR
-		XOR		A
-		LD		(COMMAND),A				; No characters... 
-		LD		A,(CONDITIONAL)
-		OR		A
-		JR		NZ,CONDITIONAL_MARKER		; Mark as conditional.
-		LD		A,' '
-		CALL	PRINTCHAR
-		RET
-CONDITIONAL_MARKER:
-		LD		A,'-'
-		CALL	PRINTCHAR
-		RET
-		
-PRNRESET:									;RESET BUFFER.
-		XOR		A
-		LD		(PRNBUFFER),A				; No characters in buffer.
-		RET
-
-PRNTEMPCHAR: DB	$00							; Store last character.			
-
-PRNADDCHAR:									; Rem Move characters to buffer
-	PUSH HL									; PReserve the register's we're using since we're shimmed in. 
-	PUSH DE
-	PUSH AF
-		LD		(PRNTEMPCHAR),A				; Save the character.
-		CP		' ' 						; Compare to space.
-		JR		C,PRNADDCHAR_EXIT			; EXIT if code is lower than space. 
-;		LD		A,(PRNOUT)					; It's just a few wasted cycles, so we can just write it for no reason too. 
-;		OR		A
-;		JR		Z,PRNADDCHAR_EXIT			; Exit if we're not in PRN mode...
-		LD		A,(PRNBUFFER)
-		LD		HL,PRNCHARS
-		CP		(HL)							; Buffer 49 characters. Let's not deal with the 80th character. 
-		JR		NC,PRNADDCHAR_EXIT			; Exit if the buffer is full. 		
-		LD		HL,PRNBUFFER
-		LD		E,(HL)						; We start with zero, so 1 character is the first... Goes up from there. 
-		INC		E
-		LD		(HL),E						; Move the character along and add one for the count. 
-		LD		D,0
-		ADD		HL,DE
-
-		LD		A,(PRNTEMPCHAR)
-		LD		(HL),A						; Store the character and exit. 
-PRNADDCHAR_EXIT:							; Restore registers and exit. 
-	POP	AF
-	POP	DE
-	POP	HL
-		RET
-
-PRNSOURCE:
-		LD		HL,PRNBUFFER
-		LD		A,(HL)
-		OR		A
-		RET		Z							; If there's nothing in the buffer, and it's empty, exit - don't try to print 256 characters
-		LD		B,A
-PRNSOURCE_LOOP:
-		INC		HL
-		PUSH	BC
-		PUSH	HL
-		LD		A,(HL)
-		CALL	PRINTCHAR
-		POP		HL
-		POP		BC
-		DJNZ	PRNSOURCE_LOOP
-		RET
 		
 KEYPRESS:
 		CP		$03
@@ -986,12 +847,12 @@ CTRL_C:
 		JP		ERROR_OUT			; Break out - Restore stack, exit. 
 
 
-M2PASS: DB	5,'2PASS'	; Set to do two local passes if called within a module.
+M2PASS: DB	5,'2PASS'	; Set to do two passes if called within a module.
 LOCAL:	DB	5,'LOCAL'	; LOCAL variables - Set base of variables to the current module to prevent mixing of same labels. Sets up a point in the table that can be returned to in Pass 2. 
 GLOBAL:	DB	6,'GLOBAL'	; Switch back to Global tables. Note: LOCAL can be used multiple times, and will set the base of the lable table to start at what is specified by LOCAL. Global resets. 
-;MODID:	DB	5,'MODID'	; Like EQU (same as EQU) but denotes a module ID. Used to affect local variables. Can be used in future to determine if a version class has occured. 
-;MODCL:	DB	5,'CLEAN'	; Clean up command to remove module local variables at this point if pass=2. 
-;MODCN:	DB	6,'LASTLABEL'	; Remove all labels after the noted one. All Module directives are redundant now. 
+MODID:	DB	5,'MODID'	; Like EQU (same as EQU) but denotes a module ID. Used to affect local variables. Can be used in future to determine if a version class has occured. 
+MODCL:	DB	5,'CLEAN'	; Clean up command to remove module local variables at this point if pass=2. 
+MODCN:	DB	6,'REMOVE'	; Remove all labels after the noted one. 
 
 EQU:	DB	3,'EQU'		; EQUates label,value
 SETVAR:	DB	6,'SETVAR'		; SET's an existing label to the value defined ( like EQU, but can be repeated - Does not create a label if not existing.)
@@ -1001,10 +862,8 @@ BLOCK:	DB	5,'BLOCK'	; Block of code
 ORG:	DB	3,'ORG'		; Origin
 OFFSET:	DB	6,'OFFSET'	; Offset to add to PC when writing code.
 TARGET:	DB	6,'TARGET'	; Target ORG ( Maintain current ORG, Set offset to result in the TARGET ORG for assembly )
-RORG:	DB	4,'RORG'	; Relocated-ORG - Write as though ORG was RORG, but to the current ORG memory location.
-REND:	DB	4,'REND'	; Relocated-END-ORG - Collapse the previous RORG instruction ( assuming no other TARGET or OFFSET were made)
-END:	DB	3,'END'		; End of source. Do not process the source file any further. 
-MSG:	DB	3,'MSG'		; Show Message to console. No Spaces, No operators... Only text and _ (Underscore) Allowed. 
+END:	DB	3,'END'		; End of source.
+MSG:	DB	3,'MSG'		; Show Message to console. 
 SHEX:	DB	4,'SHEX'	; Show HEX value to console.
 SDEC:	DB	4,'SDEC'	; Show DEC value to console.
 SBIN:	DB	4,'SBIN'	; Show BIN value to console.
@@ -1017,7 +876,6 @@ ENDIF:	DB	5,'ENDIF'	; Compile ALL following instructions (end of conditional)
 MACRO:	DB	5,'MACRO'	; Define a macro. MACRO MACRO-NAME CODE MEND defines the Macro.
 MEND:	DB	4,'MEND'	; Macro End. Ends the Macro. 
 CLNUP:	DB	5,'CLEAN'	; Clean up the label table ( Remove all entries with a ~ at the start )
-DELETE:	DB	6,'DELETE'	; Delete an label.
 INCLD:	DB	7,'INCLUDE'	; Include - For bringing other files into the assembly. 
 BNCLD:	DB	8,'BINCLUDE'	; Binary Include - For bringing bitmaps, tables and other binary information into the assembly.
 SHWLAB:	DB	10,'SHOWLABELS'	; Show the entire label table.
@@ -1206,11 +1064,11 @@ IF_TEST_SIGN:						; Test the value.
 		RL		H					; Rotate Bit 15 into C. 
 		RET							; And return C or Not C. C=Negative. NC=Positive. 
 
-;TEST_MODID:							; Same as EQU, but denotes a module ID and Version for the purpose of loading... Later can get this to examine when module repetition is required. 
-;		LD		DE,MODID
-;		CALL 	TESTLOOP
-;		JP		Z,SET_EQU			; Set the EQU. 	
-;		RET
+TEST_MODID:							; Same as EQU, but denotes a module ID and Version for the purpose of loading... Later can get this to examine when module repetition is required. 
+		LD		DE,MODID
+		CALL 	TESTLOOP
+		JP		Z,SET_EQU			; Set the EQU. 	
+		RET
 
 TEST_EQU:
 		LD		DE,EQU
@@ -1260,55 +1118,6 @@ TEST_OFFSET:
 		POP		HL
 		RET	
 
-
-TEST_TARGET:					; Set the target for the code - Leaves PC the same, but changes the offset ( where it writes code )
-		LD		DE,TARGET
-		CALL	TESTLOOP
-		RET		NZ
-		
-		CALL	GETWORD_TO_END
-		CALL	EVAL
-		LD		HL,(VALUE)
-		LD		DE,(PC)
-		OR		A
-		SBC		HL,DE
-		LD		(PC_OFFSET),HL
-		POP		HL
-		RET
-		
-TEST_RORG:					; Set the target for the code - Effectively leaves PC the same, but changes the offset ( where it writes code )
-		LD		DE,RORG
-		CALL	TESTLOOP
-		RET		NZ
-		CALL	GETWORD_TO_END
-		CALL	EVAL
-		
-		LD		HL,(VALUE)
-		LD		DE,(PC)
-		LD		(PC),HL
-		EX		DE,HL
-		OR		A
-		SBC		HL,DE
-		LD		(PC_OFFSET),HL
-		POP		HL
-		RET
-		
-TEST_REND:					; Set the target for the code - Leaves PC the same, but changes the offset ( where it writes code )
-		LD		DE,REND
-		CALL	TESTLOOP
-		RET		NZ	
-		
-		LD		HL,(PC)
-		LD		DE,(PC_OFFSET)
-		ADD		HL,DE
-		LD		(PC),HL
-		LD		HL,$0000
-		LD		(PC_OFFSET),HL
-		POP		HL
-		RET
-		
-		
-		
 TEST_END:
 		LD		DE,END
 		CALL	TESTLOOP
@@ -1566,33 +1375,59 @@ MACRO_LOOP_1:							; Now we read to the end of the line, or the next operator..
 		LD		A,(EOL)					; Did we get an EOL? We will still count lines, but we need to know if we got an EOL before we clear it. 
 		OR		A
 		JR		Z,MACRO_LOOP_1			; if it's not an EOL yet, we can do another read. Note we're still on the same line. 	
-		CALL	LINE_COUNTER			; Update the line counter. We will read lines while reading MACROs. 
-		CALL	MACRO_PIPE				; Later store a | symbol. We replace EOL with | so a macro is on one line. 
-; Now do the same with GETWORD_TO_END until we hit the end, then back to GETWORD_TO_WS.
+		
+		CALL	LINE_COUNTER			; Update the line counter.
+		CALL	MACRO_PIPE				; Later store a | symbol. 
+		
+										; Now do the same with GETWORD_TO_END until we hit the end, then back to GETWORD_TO_WS.
 		JR		MACRO_LOOP
 
-TEST_DELETE:
-		LD		DE,DELETE
+
+TEST_MEND:
+		LD		DE,MEND
 		CALL	TESTLOOP
 		RET		NZ
-		CALL	GETWORD_TO_WS	
-		CALL	MATCH_LABEL
-		JP		NC,LABEL_NOT_EXIST		; If we look for a label that doesn't exist, that's an issue.	
-		CALL	DELETE_LABEL			; And exit via delete. 
+
+		RET
+
+
+
+TEST_MODCN:		
+		LD		DE,MODCN
+		CALL	TESTLOOP
+		RET		NZ
+		CALL	GETWORD_TO_WS			; Get the next label from the line so we know what to clean up after.
+		CALL	MATCH_LABEL				; Find the location in memory.
+		JP		NC,LABEL_NOT_EXIST		; If we look for a label that doesn't exist, that's an issue.						
+		LD		(HL),$00
+		INC		HL
+		LD		(HL),$00				; Just write the end of file market into the label start position.
+		POP		HL						; And exit calling loop. 
+		RET		
+
+TEST_MODCL:								; Erase ~ prefix from label table after specified label.
+		LD		DE,MODCL
+		CALL	TESTLOOP
+		RET		NZ
+		CALL	GETWORD_TO_WS			; Get the next label from the line so we know what to clean up after.
+		CALL	MATCH_LABEL				; Find the location in memory.
+		JP		NC,LABEL_NOT_EXIST		; If we look for a label that doesn't exist, that's an issue.
+		PUSH	HL
+		POP		DE						; Copy HL to DE.
+		CALL	CLEAN_LABEL_TOP			; So we can start from partway through the table at the noted label (including the label ).
+		POP		HL
+		RET	
+		
+
+TEST_CLNUP:
+		LD		DE,CLNUP
+		CALL	TESTLOOP
+		RET		NZ
+		
+		CALL	CLEAN_LABEL
 		POP		HL
 		RET
 
-TEST_DELGRP:
-		LD		DE,DELGRP
-		CALL	TESTLOOP
-		RET		NZ
-		CALL	GETWORD_TO_WS
-		CALL	MARK_BUFFER				; Mark the buffer to be a GROUP and not a normal label. 
-		CALL	MATCH_LABEL
-		JP		NC,LABEL_NOT_EXIST		; If we look for a label that doesn't exist, that's an issue.	
-		CALL	DELETE_GROUP 			; And exit via delete. 
-		POP		HL
-		RET
 
 SET_SET:
 		CALL	GETWORD_TO_END			; Get the label. And get the comma. 
@@ -1613,9 +1448,9 @@ SET_EQU:
 		CP		$02
 		JR		Z,SET_EQU_PASS2			; Pass 2, we need to match existing labels, and change the value. Pass one made sure no reassignment occured. 
 		
-;		LD		A,(BUFFER+1)			; In case we're in global pass 2, test for temporary label first.
-;		CP		'~'						; temp label.
-;		JR		Z,SET_EQU_GPASS2_PASS1	; Special case, GPASS2, but pass 1.
+		LD		A,(BUFFER+1)			; In case we're in global pass 2, test for temporary label first.
+		CP		'~'						; temp label.
+		JR		Z,SET_EQU_GPASS2_PASS1	; Special case, GPASS2, but pass 1.
 		
 		LD		A,(GPASS)
 		CP		$02	
@@ -1730,6 +1565,7 @@ TEST_INCLD:
 		
 		CALL	RECURSIVE_PASS			; Call a recursive pass. Open another source file as though it's the current one but keep everything else the same. 
 
+		
 		LD		A,(INCLUDE)
 		DEC		A
 		LD		(INCLUDE),A
@@ -1901,10 +1737,9 @@ TEST_OPEN:
 		RET		NZ
 		
 		CALL	GETWORD_TO_END			; Get the label.
-;		LD		A,(BUFFER)
-;		OR		$80
-;		LD		(BUFFER),A				; Mark the label in the buffer as a group type label. (marked label)
-		CALL	MARK_BUFFER				; Mark the label in the buffer as a group type label. 
+		LD		A,(BUFFER)
+		OR		$80
+		LD		(BUFFER),A				; Mark the label in the buffer as a group type label. (marked label)
 		CALL	MATCH_LABEL				; Match the label. We assume it should exist.
 										; If Found     - HL=LABEL START, DE=VALUE START.
 
@@ -2172,7 +2007,8 @@ TEST_INSTRUCTIONS:
 		LD		(COMMAND),HL
 		LD		(COMMAND+2),HL
 		LD		(COMMAND+4),HL		; Clear the command buffer where we might assemble the command. 
-									; A successful routine should POP HL and RET.  
+									; A successful routine should POP HL and RET. 
+
 
 		LD		A,(OPERATOR)
 		CP		':'					; Check for a : since if we follow a label with a ':' it's going to be a special label declaration.
@@ -2207,9 +2043,9 @@ TEST_INSTRUCTIONS:
 		CALL	TEST_IM				; Test Interrupt Modes.
 
 									; And other assembler directives. 
-;		CALL	TEST_MODID			; Module ID - Redundant - Have removed modules in favor of groups. Groups working correctly now.
-;		CALL	TEST_MODCL			; Clean up all local variables in label table after the specified MODID value. (eg, remove module local variables and any subsequent local variables )
-;		CALL	TEST_MODCN			; END the label table at the specified label AND delete the label itself as well... All subsequent (created later) labels are also deleted. 
+		CALL	TEST_MODID			; Module ID - For version checking / reduction of redundant code 
+		CALL	TEST_MODCL			; Clean up all local variables in label table after the specified MODID value. (eg, remove module local variables and any subsequent local variables )
+		CALL	TEST_MODCN			; END the label table at the specified label AND delete the label itself as well... All subsequent (created later) labels are also deleted. 
 		CALL	TEST_EQU			; See if it's EQU.
 		CALL	TEST_SETVAR			; See if it's a label reassignment. 
 		CALL	TEST_DB				; DB strings. 
@@ -2225,13 +2061,8 @@ TEST_INSTRUCTIONS:
 		CALL	TEST_SBIN			; Show binary?
 		CALL	TEST_SCR			; Show any Carriage Returns?
 		CALL	TEST_OFFSET			; Are we assembling to a different location?
-		CALL	TEST_TARGET			; We can also change the offset via a target address - Target is where we want to write to. 
-		CALL	TEST_RORG			; Setup Relocatable ORG - as though we did it with an ORG and a TARGET command. Write current mem. 
-		CALL	TEST_REND			; Relocatable ORG end. Go back to where it would have been on the original ORG and code
 		CALL	TEST_END			; Have we reached the stated EOF before the physical EOF?
-;		CALL	TEST_CLNUP			; Clean up unwanted local label entries. REDUNDANT. 
-		CALL	TEST_DELETE			; Delete a label. 
-		CALL	TEST_DELGRP
+		CALL	TEST_CLNUP			; Clean up unwanted local label entries. 
 		CALL	TEST_INCLD			; ASM Includes
 		CALL	TEST_BNCLD			; Binary Includes
 		CALL	TEST_SHWLAB			; Show label table. 
@@ -2288,9 +2119,9 @@ TEST_LABEL:								; It's not really an instruction, but it's not a directive ei
 ;				LD		(BUFFER),A		; Reduce buffer size by 1 character to remove ':' character from end of label. 
 				
 										; Special case test for ~LABEL: ( Temporary temporal label ). 
-;		LD		A,(BUFFER+1)			; In case we're in global pass 2, test for temporary label first.
-;		CP		'~'						; temp label.
-;		JR		Z,TEST_LABEL_GPASS2_PASS1	; Special case, GPASS2, but pass 1.
+		LD		A,(BUFFER+1)			; In case we're in global pass 2, test for temporary label first.
+		CP		'~'						; temp label.
+		JR		Z,TEST_LABEL_GPASS2_PASS1	; Special case, GPASS2, but pass 1.
 		
 		LD		A,(GPASS)
 		CP		$02	
@@ -3797,8 +3628,8 @@ TEST_SINGLE_OPCODE:					; All the opcodes that are a single specific opcode. Wit
 		LD		A,$76
 		JP		Z,ONE_OPCODE
 
-		LD		DE,RET		; I already test RET earlier - Did I only check for conditions??? Need to go back and clean this one out maybe. ref: TEST_RET:
-		CALL	TESTLOOP	; Before I remove it, consider conditions like EOL at the end of ret, eg, RET<EOL> and RET <EOL>
+		LD		DE,RET
+		CALL	TESTLOOP
 		LD		A,$C9
 		JP		Z,ONE_OPCODE
 
@@ -4199,7 +4030,7 @@ TEST_EX_DEHL:
 
 
 		
-; Label table related routines, for searching, adding, deleting etc. 
+
 ; LABEL_TABLE is the start location at the end of code ( Note - Need to check for Overflow, TPA etc, Stack etc )
 ; The table is a linked list, as per the following.
 ; 
@@ -4209,154 +4040,61 @@ TEST_EX_DEHL:
 ;LABEL_VALUE,2 bytes. Integer. LSB MSB Regardless of 8 or 6 bit operations. 
 ;Repeats. 
 ;
-					
 
-DELETE_TABLE_POS:		DW $0000			; So we can fix groups later, record the original start position. 
-DELETE_DESTINATION: 	DW $0000			; Start of label/memory to overwrite.
-DELETE_SOURCE:			DW $0000			; Start of label that will overwrite it. 
-DELETE_NEXT:	DW $0000					; The label *after* the one we're going to remove. 
-DELETE_COUNT:	DW $0000					; The size of data we're deleting in total ( the label ). Remove this from vectors. 
-DELETE_SOURCE_COUNT:	DW $0000					; The size of the label we're shifting. 
-DELETE_VALUE:	DW	$0000					; The place where the value of the replaced label exists in memory. 
+CLEAN_LABEL:		; Routine to delete a label/labels... Foreseeing that we might get a LOT of labels in the code. ONLY for deleting local labels used in included ASM files.
+;		LD		HL,LABEL_TABLE			; Starting point. We always start with the beginning of the table, because that's where system labels exist. 
+;		LD		DE,LABEL_TABLE
+		LD		HL,(LABEL_BASE)			; Starting point.
+		LD		DE,(LABEL_BASE)
 
-DELETE_GROUP:							; Preamble to CLOSE the group first.... Then Delete it just like a label. 
-		PUSH	HL						; Preserve the location of the group.
-		CALL	TEST_OPEN_CHECKSTATE	; Then force CLOSED...
-		CALL	C,SWAPVALUES			; Swap HL and DE vector values to FORCE the group CLOSED.		
-		POP		HL						; And recover the start of the group, now delete it as per a single label. 
-
-DELETE_LABEL:							; Call after locating the label you wish to delete. Deletes a SINGLE label or a SINGLE group.
-										; Carried over - HL=LABEL START, DE=VALUE START.
-		LD		(DELETE_TABLE_POS),HL	; Save this for the Group Vector 2 fix after we've moved the table. 									
-		LD		(DELETE_DESTINATION),HL	; Store the start location - destination of shift. 
+CLEAN_LABEL_TOP:
+		PUSH	DE
+		PUSH	HL
 		LD		E,(HL)
 		INC		HL
-		LD		D,(HL)					; DE holds the location we're shifting from.
-		DEC		HL						; Restore original HL.
-		EX		DE,HL					; move DE to HL, and HL to DE. 
-										; DE now holds start of label we're deleting. HL holds the next label start. 
-		LD		(DELETE_SOURCE),HL		; Store that also. 
-		OR		A
-		SBC		HL,DE					; Calculate how much we're taking out of the label table. 
-		LD		(DELETE_COUNT),HL		; Store that. It's how much we need to take from every vector we move. 		
+		LD		D,(HL)
 
-DELETE_TRANSFER:						; Let's shift the next label backwards.
-; Start by finding the length of label to transfer.
-		LD		HL,(DELETE_SOURCE)		; First work out how long the label is.
-		LD		E,(HL)
-		INC		HL
-		LD		D,(HL)					; Now DE holds the address of the next label start. We also need to test for a marker here.
-; Test for end of table here for convenience. 
-		LD		A,D						; If this label points to 0000 as the next label, then it's the end of list marker. 
-		OR		E						; So we test DE before we go any further - If DE=0 then we're at the end. 
-		JR		Z,DELETE_DONE			; Exit and reset market at current location of "DELETE_DESTINATION" - instead of copying since length is unsure. 
-; Back to length of label calculation. 	
-		EX		DE,HL					; But normally, we just now calculate the size of the label we're moving. 
-		LD		(DELETE_NEXT),HL		; Store the subsequent label location now, before we move and change it. 
-		OR 		A
-		SBC 	HL,DE	
-		INC		HL						; This is a counter - not a position, so add one for the first character in position 0. 
-		LD		(DELETE_SOURCE_COUNT),HL		; calculate total number of characters in the source label.  How many bytes will we transfer?
-		
-		LD		HL,(DELETE_SOURCE)		; We got everything we need, so let's move a single label.
-		LD		DE,(DELETE_DESTINATION)	; Should already hold it.
-		LD		BC,(DELETE_SOURCE_COUNT)
-		LDIR							; Transfer the label. 
+		LD		A,D						; Perform a quick test here to see if we're at the end of the list. 
+		OR		E						; if the DE vector is 0, we are at the end of the list.
+		JR		Z,CLEAN_LABEL_DONE		; So we exit.
 
-; Update the vector to the next label. 
-		LD		HL,(DELETE_DESTINATION)	; Let's update the newly moved label vectors. This is the first label vector. 	
-		LD		E,(HL)
 		INC		HL
-		LD		D,(HL)					; Get the current vector.
-		EX		DE,HL					; Load destination vector into HL.
-		LD		BC,(DELETE_COUNT)		
-		OR		A
-		SBC		HL,BC
-		EX		DE,HL					; Recover the destination address (+1) into HL, DE holds the new vector. 
-		LD		(HL),D
-		DEC		HL
-		LD		(HL),E					; And write it into the label vector location.
-; Reload the starting points for the next transfer and set up for the next label. 		
-		LD		(DELETE_DESTINATION),DE	; Update the destination.
-		LD		DE,(DELETE_NEXT)
-		LD		(DELETE_SOURCE),DE		; And update the source.
-; and Iterate!		
-		JR		DELETE_TRANSFER			; Iterate through the remaining labels until we get the end of table marker. 
-		
-DELETE_DONE:
-; Let's finish the migration with a new end-of-table marker being set in. 
-		XOR		A						; Set in the new end-of-list marker and exit. 
-		LD		HL,(DELETE_DESTINATION)
-		LD		(HL),A
 		INC		HL
-		LD		(HL),A
-		
-; Now we scan the entire table and move any group vectors in the values that are past
-; the start location.
-		LD		HL,(LABEL_BASE)			; Let's start at the very beginning to fix the GROUP second vectors.
-DELETE_FIX_LOOP:
-; First get the next label into DE...		
-		LD		(DELETE_DESTINATION),HL	; Temp store the label start location we're at. Reuse this variable here. 
-		LD		E,(HL)
-		INC		HL
-		LD		D,(HL)					; DE now holds vector to next label.
-; Test for the End Of Table marker ($0000 as the next label )
-		LD		A,D
-		OR		E			
-		RET		Z						; Return as soon as we get the end of table marker.
-; And test for group.
-		INC		HL						; And get the counter / group flag. 
-		LD		A,(HL)
-		AND		$7F
-		CP		(HL)					; Did it change? If not zero, then it's a GROUP operation. 
-		JR		NZ,DELETE_FIX_GROUP		; Iterate.... If it wasn't a GROUP marker.  
-		EX		DE,HL					; If it wasn't a group, then get the next label in DE and move to HL.
-		JR		DELETE_FIX_LOOP		; And interate through the group.
-
-DELETE_FIX_GROUP:						; Label was a GROUP. HL is currently on the counter. A holds the length.
-		LD		C,A						; Number of characters in the label. 
-		INC		C						; Add one character for the counter. 
-		LD		B,$00
-		ADD		HL,BC					; Move to the vector 2 of the group label. HL points to is.
-		LD		(DELETE_VALUE),HL		; Store it in a now-unusued location before we check if it's after the label removed. 
-; Test if we're at or past the original deleted label. 
-		LD		C,(HL)					; We want to test the second vector value in the GROUP label.
-		INC		HL						; And HL was at the second vector memory location. 
-		LD		B,(HL)					; So now we get second vector value from memory in BC.
-		LD		HL,(DELETE_TABLE_POS)	; Get the place where we deleted the label. 
-		OR		A						; Clear carry. 
-		SBC		HL,BC					; Let's compare the outcome. 
-		JR		C,DELETE_FIX_THIS		; We only fix the ones that are PAST or AT the label location of the delete label. 
+		LD		A,(HL)					; DE holds vector to next entry. A holds the critical first byte of the label itself. 
+		POP		HL
+		PUSH	HL						; Restore original location of HL. 
 		EX		DE,HL
-		JR		DELETE_FIX_LOOP
+		OR		A
+		SBC		HL,DE					; Find out how many bytes in the label.
+		PUSH	HL
+		POP		BC						; BC now holds size of label.
+		POP		HL						
+		POP		DE						; HL and DE now hold the current label source (HL) and destination (DE) which will change as entries are removed.
+
+		CP		'~'						; Look for the "local" or "deletable" marker for the label.
+		JR		Z,CLEAN_LABEL_DROP		; If we find the "local" part of the label, drop it. 
+		LDIR							; If we didn't jump out, it means the label was valid and not marked for deletion. 
+
+		JR		CLEAN_LABEL_TOP			; And otherwise loop until all labels are checked or removed and the table list dropped. 
 		
-DELETE_FIX_THIS:						; This is something that needs to be fixed
+CLEAN_LABEL_DROP:
+		PUSH	DE						; Temp store the destination - Don't lose it. 
+		PUSH	BC
+		POP		DE
+		ADD		HL,DE					; Move HL along to the next label start. 
+		POP		DE						; Recover the current destination at the end of the list.
+		JR		CLEAN_LABEL_TOP			; Return to scan/copy loop with HL as new label start, and DE as old label end. 
+		
+	
 
-PUSH DE
-LD		DE,(DELETE_TABLE_POS)
-CALL	DEHEXPRINT
-LD		DE,(DELETE_VALUE)
-CALL	DEHEXPRINT
-LD		DE,(DELETE_COUNT)
-CALL	DEHEXPRINT
-CALL 	CRLF
-
-POP DE
-
-
-		LD		HL,(DELETE_VALUE)		; Recover the location of the delete vector. 
-		LD		BC,(DELETE_COUNT)		; Update the second vector - different way. 
-		LD		A,(HL)
-		SUB		C
-		LD		(HL),A
+CLEAN_LABEL_DONE:
+		POP		HL
+		POP		DE						; Restore the pointers from the stack. 
+		EX		DE,HL					; Swap DE and HL so the top of the new label table is in HL... We need to put in the zero marker here now to terminate the table. 
+		LD		(HL),$00
 		INC		HL
-		LD		A,(HL)
-		SBC		A,B
-		LD		(HL),A
-		EX		DE,HL					; Recover the next label in DE ( there *might* be something after the Group label )	
-		JR		DELETE_FIX_LOOP			; And interate. 
-		
-;;; AND WE'RE DONE ! We've moved the later labels up in the table, and fixed the second vector of group labels. 
+		LD		(HL),$00 				; Write a new marker for the end of the table.
+		RET								; And exit. 
 
 
 MARKED_LABEL:	DB	$00					; Flag, if label is marked, will hold the length of the label. If a normal label, will hold $00. 		
@@ -4553,12 +4291,6 @@ LABEL_EXISTS:							; OK, we found the label.. Update if it's zero. If it's not,
 ;		RET
 			
 
-
-; Lexical routines - Testloop is a key routine.
-; It matches text in the input (from getword ) against a pattern pointed to by DE. We use it to check for 
-; known syntax for commands and opcodes. 
-
-
 TESTLOOP:
 		LD	HL,BUFFER
 		LD	B,(HL)		; First byte is the count. But we also test the count, so add a loop for the count.
@@ -4608,26 +4340,23 @@ PWEND:
 
 
 PRINTLINE:													; Print the incomming line number from the source file. 
-		DEC		A									; We still have PRNOUT in A.
-		JR		Z,PRINTLINE_NOPASS					; More on the line?
 
 		LD		DE,PRINTWORD_GPASS
 		CALL	PRINTSTRING
 		LD		HL,(PASS)
 		CALL	PRINTHEX16
-
-PRINTLINE_NOPASS:		
+		
 		LD		DE,PRINTWORD_DEEP
 		CALL	PRINTSTRING
 		LD		A,(INCLUDE)
 		CALL	PRINTHEX							; Show in hex how deep we are into recursion. 
 
 		LD		DE,PRINTWORD_LINE					; Tell the user 'Line'
-		CALL 	PRINTSTRING
+				CALL 	PRINTSTRING
 				
-		LD		HL,(LINE_NUMBER)					; Print the Line Number.
-		CALL	PRINTDEC16
-		RET
+				LD		HL,(LINE_NUMBER)					; Print the Line Number.
+				CALL	PRINTDEC16
+				RET
 
 PRINTPC:													; Print the program counter. 
 		LD		DE,PRINTWORD_MEMADDRESS				; Tell the user the PC comes next.
@@ -4763,7 +4492,6 @@ GETCHAR_MACRO_MORE:
 		LD		A,(HL)
 		INC		HL
 		LD		(MACRO_POINTER),HL
-		CALL	PRNADDCHAR				; And send the command to the PRN output. 
 ;PUSH AF
 ;	LD		E,A
 ;	CALL PRINTCHARE
@@ -4802,6 +4530,7 @@ UNSTACK_MACRO:
 		LD		(MACRO_COUNT+1),A	
 		RET
 
+
 		
 GETCHAR:
 				LD		A,(IN_MACRO)
@@ -4817,7 +4546,6 @@ GETCHAR:
 											; WARNING. Note there is an error bypass in the GETCHAR_NEXTPAGE routine that exits via GETCHAR_READERROR. 
 				ADD		HL,DE				; Next character location in memoory. 
 				LD		A,(HL)				; Retrieve the next character from the file buffer.
-				CALL	PRNADDCHAR			; Might want to send this to PRNADDCHAR. 
 				LD		HL,CHARPOS
 				INC		(HL)				; Note we've moved to the next character position. 
 				RET							; And return. 
@@ -4833,8 +4561,10 @@ GETCHAR_NEXTPAGE:
 				LD		HL,(CHAR_RECORD)
 				INC		HL
 				LD		(CHAR_RECORD),A		; Update the record counter we want. Not sure I really need to do this, but later I'll add line counter too.
-				LD		DE,$0080
-				LD		HL,$0000					; Reset values of DE and HL to ensure we get the correct character. 
+	
+		LD		DE,$0080
+		LD		HL,$0000					; Reset values of DE and HL to ensure we get the correct character. 
+
 				RET							; Get the next 
 
 GETCHAR_READERROR:
@@ -4843,7 +4573,6 @@ GETCHAR_READERROR:
 				LD		(EOF),A				; Set the END OF FILE byte. We're read past the end of file or hit another disk issue. 
 				LD		A,26				; Insert and End Of File marker into the stream. ( File may have been ended without EOF ). 
 				RET							; And just drop out with an EOF. 
-
 
 
 
@@ -5409,14 +5138,12 @@ PRINTHEX16:
 		POP		HL
 		LD		A,L					; And fall through
 		
-PRINTHEX:								; Print a HEX number in A
-	PUSH BC
+PRINTHEX:							; Print a HEX number in A
 		LD		(PRINTHEXCHAR),A		; Load up the byte to change. 
 		CALL	HEXCONV					; Convert the first nibble and return in A.
 		CALL	PRINTCHAR
 		CALL	HEXCONV
 		CALL	PRINTCHAR
-	POP	BC
 		RET
 
 		
@@ -6021,7 +5748,7 @@ EQU INTELRECORDLEN,$10					; How long should the record length be for Intel Hex 
 LAST_ADDRESS:	DW	$0000				; Last address - If we go up by more than 1, we need to close the current output and start a new line.  Means ORG has changed. 		
 WRITE_BYTE_STORE:	DB	$00				; Temp store for the byte we're writing.
 ;WRITE_ADDR_STORE:	DW	$0000			; Temp store for the location we want to write to.
-										; Fall through for the second. 
+
 WRITEBYTE:
 		LD		HL,(PC)
 		LD		DE,(PC_OFFSET)			; We can write to a different location.
@@ -6038,9 +5765,9 @@ WRITEBYTE:
 		LD		A,(PASS)
 		CP		$01
 		JR		Z,DRY_WRITE				; If in local pass1, don't write anything. 
-;		LD		A,(GPASS)				; Defunct - Local includes and modules will likely be written in Gpass1,Pass2. 
-;		CP		$01
-;		JR		Z,DRY_WRITE				; or if in Global pass 1, don't write anything. 
+		LD		A,(GPASS)
+		CP		$01
+		JR		Z,DRY_WRITE				; or if in Global pass 1, don't write anything. 
 
 
 WRITE_BYTE_FORCE_WET:						; Might jump here if the code requires a forced write - eg, Single pass enforced or Global Pass 1 includes. 	Dry overrides. 
@@ -6051,8 +5778,7 @@ WRITE_BYTE_FORCE_WET:						; Might jump here if the code requires a forced write
 		LD		A,(INTELFORMAT)
 		OR		A
 		JR		NZ,INTELHEX				; If this is set, HEX format output.
-		
-; If it wasn't a specified format, just write bytes direct to the file sequentially with no other information. 
+
 		LD		A,(WRITE_BYTE_STORE)		; Recover the byte.
 		CALL 	BYTE_TO_FILE				; And write to the output file. 
 		
@@ -6209,6 +5935,8 @@ INTELPC:		DW	$0000				; Initial location of PC.
 INTELTYPE:		DB	$00					; Intel data type.
 INTELBUFFER:	BLOCK	INTELRECORDLEN	; How many data bytes in record? Max number. Might be less than this.
 INTELCSUM:		DB	$00					; Checksum, Inverted, +1.		
+
+
 
 
 ;  Below we assemble the bytes from the command, add a prefix and maybe swap the displacement ( postfix ) into the second last byte. 
@@ -6592,39 +6320,27 @@ SHOW_LABEL_NEXTLABEL:					; From here, we just repeat.
 
 	
 SHOW_LABELS_PLOOP:						; Show Label Printloop. Print the label next up (HL is at the start of the text, B=length of label name
-										; Coming in here, the count is in B, but we also have HL pointing to B. 
-	PUSH 	HL							; Print the value first - it's more readable this way, even if more code. 
-	LD		D,$00
-	LD		E,B
-	INC		E							; And add a byte for the count. 
-	ADD		HL,DE
-	LD		E,(HL)
-	INC		HL
-	LD		D,(HL)
-	CALL	DEHEXPRINT
-
-	LD		E,' '						; Print a space...
-	CALL	SHOW_CHAR					; Make a space. (Maybe make a tab later?)
-		
-	POP		HL
-	
-SHOW_LABELS_PLOOP2:
 	INC		HL
 	LD		E,(HL)
 	CALL	SHOW_CHAR					; Display the character in the label. 
-	DJNZ	SHOW_LABELS_PLOOP2			; All of the characters in the label are displayed one after another. 
+	DJNZ	SHOW_LABELS_PLOOP			; All of the characters in the label are displayed one after another. 
 
+	LD		E,' '
+	CALL	SHOW_CHAR					; Make a space. (Maybe make a tab later?)
 
+	INC		HL
+	LD		E,(HL)						; Get the value in the label / variable. 
+	INC		HL
+	LD		D,(HL)						; DE now holds the value. 
 
-;	INC		HL							; We print this at the start of the line now for more readability. 
-;	LD		E,(HL)						; Get the value in the label / variable. 
-;	INC		HL
-;	LD		D,(HL)						; DE now holds the value. 
-;	CALL	DEHEXPRINT					; Print the value in DE, preserve HL and BC. 
+;	PUSH HL								; Preserve HL
+;	EX		DE,HL						; Transfer the value from DE to HL for display.
+;	CALL	PRINTHEX16					; Print the value of the label currently in HL . - As hex. 
+;	POP HL								; Recover HL. 
+
+	CALL	DEHEXPRINT					; Print the value in DE, preserve HL and BC. 
 	
 	INC		HL							; And move onto the next label ready to read it, though we might be in Macro space also. 
-	INC		HL
-	INC		HL
 
 	RET
 	
@@ -6640,14 +6356,6 @@ END_OF_PROGRAM:						; Anything past this point is undefined data - either syste
 CSUM:			DB		$00			; Byte for summing intel hex format output.
 HEXCOUNT:		DB		$00			; How many bytes should we install per line? ( We will begin with the PC whatever it is. )
 INTELFORMAT:	DB		$00			; If not zero, output in INTEL FORMAT
-PRNOUT:			DB		$00			; PRN Format. Print bytes,line that generated it. 
-PRNLOC:			DW 		$0000		; 2 byte location we were writing to. 	
-PRNCHARS:		DB		$00			; Number of characters from source in PRN file output. (line length limit ) 
-;PRNCODE:		DB 		$00,$00,$00,$00	; 4 bytes of possible instructions.
-;PRNENDCODE:							; So we're clear on where it ends.
-;PRNLEN:			DB 		$00			; The length of the instruction ( in bytes ) - 0 is OK too.
-;PRNBUFPTR:		DB 		$00			; Buffer pointer. 
-PRNBUFFER:		BLOCK 	64 			; Let's store the incoming source line to recreate the PRN if required. 
 
 OUTPUT_PTR:		DW		$0000		; File Pointer - Where in the output buffer are we writing to?
 OUTPUT_COUNT:	DB		$0000		; Output Count - How many bytes have we written to the output buffer? 
