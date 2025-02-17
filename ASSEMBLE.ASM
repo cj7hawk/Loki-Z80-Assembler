@@ -71,7 +71,9 @@ arithmetic:
 ; 14/02/2025 added RORG and REND - for RelocatableORG and RelocatableEND - Changes where the PC thinks ORG is, but continues with 
 ;   		the previous ORG in memory.
 ; 			Added Memory to PRN output. 
-
+;  Bug on filename parsing for include - happens when include called from macro - eg, tex.txt becomes texxtxt
+; Updated Literal code to extend literals - so they can be used from the source also, eg, &<character> from $20 to $FF
+; All printable literals now bypass other character checks, including operators. So "+" is the same as &+
 EQU	DEBUG,$00
 
 
@@ -4972,6 +4974,7 @@ QUOTE_ERR:
 		LD	DE,ERR_QUOTE
 		JP	ERROR_OUT
 
+
 INSTRING:			DB	$00					; If not zero, we're in a string. 
 											; It is either ' or " depending on which string started it. 
 ONE_STEP:			DB	$00					; One step ahead... The last / next read character... We need a little bit of a peek ahead. 
@@ -4990,6 +4993,7 @@ GETWORD:									; DON'T CALL DIRECTLY. Either call GETWORD_TO_WS (whitespace) o
 				LD		(BUFFER_PTR),HL		; Save the pointer. 
 				
 GETWORD_NO_OPERATOR:							; No previous operator encountered so get the next word from the file. 	
+
 GETWORD_LOOP:								; Let's loop until we find something of interest. 
 
 				LD		A,(INSTRING)			; Are we in a string?
@@ -5029,12 +5033,15 @@ GETWORD_LOOP:								; Let's loop until we find something of interest.
 				LD		(INSTRING),A		; And clear the INSTRING - We no longer are in a string. 				
 
 GETWORD_BAU:								; If not in a string, it's Business As Usual.				
-
 	IFNZ	DEBUG
 	CALL PRINTDOT	; Print a dot for each character we are about to get. 
 	ENDIF
 
-				CALL	GETCHAR				; Get the next character. If we got a character before, and it was a " or ' then we'll ignore it. 
+
+
+	CALL	GETCHAR				; Get the next character. If we got a character before, and it was a " or ' then we'll ignore it. 
+
+
 
 	IFNZ DEBUG
 	PUSH AF ; Print the character we actually retrieved. 
@@ -5047,6 +5054,16 @@ GETWORD_BAU:								; If not in a string, it's Business As Usual.
 	;CALL PRINTHEX	; what is the character position in the buffer
 	POP AF				
 	ENDIF
+
+				
+				CP		'&'
+				JR		NZ,GetWord_Not_Literal	; If it wasn't literal, all normal checks apply.
+				CP		" "						; Compare to a SPACE. or DB $20. Literals ONLY for printable - $20 and upwards. 
+				JR		NC,GETWORD_ADDLITERAL	; Bypass ALL normal checks, even EOL... What's next is a LITERAL. 
+				LD		DE,ERR_EVAL_FAIL
+				JP		ERROR_OUT				; It's a problem if we get a literal that's a control code. USE DB. 
+
+GetWord_Not_Literal:	
 				CP		'.'					; Special character... We just IGNORE all DOTs as though they don't exist... Just read past them.
 				JR		Z,GETWORD_LOOP		; Redo from top if it was a '.'	
 
@@ -5066,7 +5083,7 @@ GETWORD_BAU:								; If not in a string, it's Business As Usual.
 				CALL	GETWORD_OPERATORS	; Check for operators. Will return A as 0 and the zero flag is set if it finds an operator
 											; Then loads the operator it found into the (OPERATOR) variable. Operator doesn't return if it finds an operator. It pops then returns
 											; If it returns, it wasn't an operator. 
-
+SKIPCHECKS:	; we probably got a literal character if we just jumped here (eg, & )
 ; Store the character if it's above CHR20 (space)
 				CP		$21					; Check for whitespace now. Anything up to space.
 				JR		NC,GETWORD_CHAR		; Should generate carry if there's a Space or lower. Zero for "!" but no carry.  Strip out other white space.
@@ -5078,7 +5095,7 @@ GETWORD_BAU:								; If not in a string, it's Business As Usual.
 				
 				LD		A,(READ_TO_EOL)		; Were we told to ignore Whitespace until Operator or EOL? ( or special operator ).
 				OR		A
-				JR		NZ,GETWORD_LOOP		; Ignore ALL whitespace if we have read-to-eol set to non-zero. 
+				JP		NZ,GETWORD_LOOP		; Ignore ALL whitespace if we have read-to-eol set to non-zero. 
 				
 ; We found whitespace... We can end now unless we were told otherwise ( as checkd above)
 ;				JR		GETWORD_END			; If we have content, it's the end of the word here. 
@@ -5106,6 +5123,11 @@ GETWORD_CHAR_CAPS:
 				JP		GETWORD_LOOP		; And repeat.
 
 
+GETWORD_ADDLITERAL:
+				CALL	GETWORD_ADDCHAR
+				CALL	GETCHAR
+				CALL	GETWORD_ADDCHAR
+				JP		GETWORD_LOOP		; Hack to store the literal. 
 
 GETWORD_ADDCHAR:							; Add the character to the buffer.
 				LD		HL,(BUFFER_PTR)		; Locate the next place in the buffer. 
