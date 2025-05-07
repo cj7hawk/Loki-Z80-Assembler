@@ -71,17 +71,9 @@ arithmetic:
 ; 14/02/2025 added RORG and REND - for RelocatableORG and RelocatableEND - Changes where the PC thinks ORG is, but continues with 
 ;   		the previous ORG in memory.
 ; 			Added Memory to PRN output. 
-;  Bug on filename parsing for include - happens when include called from macro - eg, tex.txt becomes texxtxt - fixed.
+;  Bug on filename parsing for include - happens when include called from macro - eg, tex.txt becomes texxtxt
 ; Updated Literal code to extend literals - so they can be used from the source also, eg, &<character> from $20 to $FF
 ; All printable literals now bypass other character checks, including operators. So "+" is the same as &+
-;  FIXED - Bug on BINCLUDE in macro - causes trailing space after " to vanish and so evaluates the final letter of filename.  
-;  FIXED - Bug on default setting of PC by init - Was loading wrong register. 
-;  FIXED - Bug on including within a MACRO.
-;  BUG - MINOR Macro indicator in PRNOUT lags - Doesn't show last line. 
-;  BUG - MINOR The code count picks up the "next" PC as the last, so overestimates by one. 
-;  FIXED - Bug on recursion Include, the default ORG gets set, but the default should be the PC at the time the INCLUDE was called. 
-;  ADDED - Ability to set PRNOUT from 00 to 01 or 02 within the code by moving it to system variables... Useful if you just want PRN for a few lines. 
-
 EQU	DEBUG,$00
 
 
@@ -132,29 +124,24 @@ OPEN_ASSEMBLY:
 				
 				LD		DE,WELCOME_MESSAGE
 				CALL	PRINTSTRING
-
+				
 				LD		HL,$006C		; Second filename in default FCB.		; Open the destination before opening the source. 
 				LD		DE,OUTPUT_FCB	; Move to the Output FCB
 				LD		BC,$10			; Filename and Drive number. 
 				LDIR				
 				CALL	OPEN_DEST		; Open the output file - don't write it to memory direct anymore. 
-
+				
 		;		CALL	PRE_INIT		; Global variables ( one time ) initialised.
 
 				LD		A,$01
 				LD		(GPASS),A		; The first "Global Pass"
 				LD		(PASS),A		; Is also a local pass.
 				CALL	OUTPUT_RESET	; Reset(SET) the counters for the output file before Pass 1 starts.
-				LD		HL,$0100
-				LD		(PC),HL		; Default PC is $0100.  OMG, I had ,A here for so long... Never noticed.
-
 				CALL	MAKE_PASS		; Use the default input file for the first pass.
 
 				LD		A,$02
 				LD		(GPASS),A		; Change the global pass number
 				LD		(PASS),A		; And the local pass number. 
-				LD		HL,$0100
-				LD		(PC),HL		; Default PC is $0100.  OMG, I had ,A here for so long... Never noticed.			
 				CALL	MAKE_PASS		; And make the second pass - call separately as we want to change GPASS ( Global Pass ) variable.
 
 				LD		A,(INTELFORMAT)
@@ -183,12 +170,11 @@ BDOS:				; BDOS intercept to allow operation on other platforms.  Just add scree
 	POP		BC
 	POP		HL
 	RET
-	
 
 PC_STORE:		DW	$0000				; If we make 2 passes here, we need to remember the starting PC for the second pass. 
 ONE_MORE_TIME:	DW	$0000				; While 00 then just 1 pass. If it's zero or one, doesn't matter. 				
 MAKE_2_PASSES:									; A module has been included, will usually be ONE pass unless modified.
-				XOR		A						; Always start to run the same passes as the calling GPASS unless we modify it with the .2pass directive. 
+				XOR		A						; Always start to run the same passes as the calling GPASS. 
 				LD		(ONE_MORE_TIME),A		; Clear the extra pass flag. ( well, byte ). The pass will set it if relevant. 
 				LD		A,(GPASS)				; Set to be the same as GPASS.
 				LD		(PASS),A				; Set the first pass to be the same as the Global Pass.
@@ -330,13 +316,13 @@ WRITE_DEST:
 				RET
 
 CLOSE_DEST:
-;				LD		A,(INTELFORMAT)
-;				OR		A
-;				JR		Z,CLOSE_DEST_BIN			; If this flag is zero, it's a BINARY file. No EOF on a BINARY file. 
-;				LD		A,$1A					; Ctrl-Z for EOF. 
-;				CALL	BYTE_TO_FILE			; Write EOF - or a standin for the moment.  - I do this in the INTEL END signature now. 
+				LD		A,(INTELFORMAT)
+				OR		A
+				JR		CLOSE_DEST_BIN			; If this flag is zero, it's a BINARY file. No EOF on a BINARY file. 
+				LD		A,$1A					; Ctrl-Z for EOF. 
+				CALL	BYTE_TO_FILE			; Write EOF - or a standin for the moment. 
 CLOSE_DEST_BIN:
-				LD		A,(OUTPUT_COUNT)		; Now we avoid having a null sector saved if it's empty. 
+				LD		A,(OUTPUT_COUNT)
 				OR		A
 				JR		Z,CLOSE_DEST_NOWRITE	; No need to close the file. We already saved with the last Write Dest.
 				CALL	WRITE_DEST			; Write it if anything remains unsaved. 
@@ -375,7 +361,7 @@ OUTPUT_RESET:
 				LD		(OUTPUT_COUNT),A
 				RET
 
-INIT_VARS:	; Initialise System Variable - Especially since we make 2 passes they will change.
+INIT_VARS:									; Initialise System Variable - Especially since we make 2 passes they will change.
 				LD		HL,$0068			; Clear out the old FCB so we can start reading it again.
 				LD		B,$18				; 24 bytes to clear.
 PASS2_CLEAR_FCB:	
@@ -395,15 +381,12 @@ PASS2_CLEAR_FCB:
 				LD		(CONDITIONAL),A		; Clear any conditional blocks to assembly. 
 				DEC		A			; Make A FF
 				LD		(EOL),A		; Set for EOL since we want to trigger a line change from 0 to 1 on first read. 
-
-;				LD		HL,$0100
-;				LD		(PC),HL		; Default PC is $0100.  OMG, I had ,A here for so long... Never noticed.
-;							DON'T CALL THIS HERE. Set the default MANUALLY at GLOBAL PASS only. 
-					
+				LD		HL,$0100
+				LD		(PC),A		; Default PC is $0100. 
 				RET
 
 
-RECURSIVE_PASS:						; Recursive store of current pass to allow an out-of-session pass and building of labels for includes
+RECURSIVE_PASS:							; Recursive store of current pass to allow an out-of-session pass and building of labels for includes
 									; We will use the stack for this.
 
 									; Now add the current source file to the stack, and all relevant variables. 
@@ -433,7 +416,8 @@ RECURSE_CLEAR_FILENAME:
 				LD		HL,$0080		; DMA in HL.
 				CALL	OPEN_AND_TEST	; Open the file and test it 
 				CALL	READ_SOURCE		; Read in the first sector. 
-
+				
+;;;				CALL	REOPEN_SOURCE	; Reopen the source with the new file. Also write in the new filename for the module. 
 
 				LD		HL,(PASS)			; The current pass values.
 				PUSH	HL
@@ -454,11 +438,10 @@ RECURSE_CLEAR_FILENAME:
 				LD		A,$FF
 				LD		(EOL),A		; Trigger line change for reading first line.
 
-				CALL	SHOW_PRN_OUTPUT ; Let's make a single final pass of the PRN output routine NOW to show the filename called in PRN OUTPUT. So we can see it
-										;    since we generate the PRN output after everything else is done, so we will miss the filename otherwise. 
+		CALL	SHOW_PRN_OUTPUT ; Let's make a single final pass to show the filename called in PRN OUTPUT. 
 
 				CALL	MAKE_2_PASSES	; Recursive call.
-
+;;				CALL	SHOW_STATS		; Neet to upgrade SHOWSTATS to cover the file it's working with. 
 
 				POP		HL					; Recover the current file buffer stats, lines and pointers. 
 				LD		(CHAR_RECORD),HL
@@ -698,7 +681,7 @@ ERROR_OUT:
 
 				LD		DE,ERROR_MACRO
 				CALL	PRINTSTRING
-		LD HL,(MACRO_LOCATION)					; Show the name/details of the Macro name that caused the error. 
+		LD HL,(MACRO_LOCATION)					; Show the name of the Macro name that caused the error. 
 		CALL SHOW_LABELS_SINGLE					; Show the label. Just so we can see it was detected. 	
 
 ERROR_OUT_NOMACRO:							; We just here if there's no macro information to display in the error. 
@@ -806,21 +789,12 @@ LINE_COUNTER:
 ; This is important, as labels can only be generated on PASS1, and should be there already on PASS2.
 ; It also allows called modules to be included recursively, and it is possible to generate code on Global Pass1 
 ;  by manipulating the PASS system variable. 
-ifnz debug
-PASSNOTICE: db '((NEWLINE))$'
-endif
-
 MAKE_PASS:							; Where the actual pass is made. 
-	
 									; Anything I need for all passes here.
 				CALL	INIT_VARS		; Initialise the variables. 
 				CALL	OPEN_SOURCE		; Open the source code file - And read the first sector.
-			
-			
+									
 PASS_LOOP:	
-
-
-
 ; Update the line count if necessary.
 				CALL	LINE_COUNTER		; If we're on a new line, update the line counter and the term counter. 
 				
@@ -832,10 +806,10 @@ PASS1_SAMELINE:
 		JP	Z,CTRL_C								; Break point. Once per pass.
 
 IFNZ	DEBUG
-;CALL	CRLF
-;CALL 	PRINTLINE							;Print the line number
-LD	DE,PASSNOTICE
-CALL	PRINTSTRING
+OR		A
+CALL	NZ,KEYPRESS
+CALL	CRLF
+CALL 	PRINTLINE							;Print the line number
 ENDIF
 							; Next we prepare to write a new instruction... So we clear the Prefix, Postfix and Addpost-flag. 
 		XOR A				; Clear out the prefix and postfix for index and textended instructions. 
@@ -882,15 +856,7 @@ SHOW_PRN_OUTPUT:
 	
 PCBACKUP: DW $0000 					; PC backup... Because we change it before we write the PRN. 
 PRINTCODE:
-		LD		A,(IN_MACRO)
-		OR		A
-		JR		Z,PRINTCODE_SPACE
-		LD		A,"M"
-		CALL	PRINTCHAR
-		JR		PRINTCODE2			; Show a M instead of a SPACE if in a MACRO. 
-PRINTCODE_SPACE:
 		CALL	PRINTSPACE			; Show where in actual memory the bytes are going. 
-PRINTCODE2:
 		LD		DE,(PCBACKUP)
 		LD		HL,(PC_OFFSET)
 		ADD		HL,DE
@@ -944,7 +910,6 @@ PRINTCODE_PADLOOP:
 ;		CALL	PRINTCHAR
 		XOR		A
 		LD		(COMMAND),A				; No characters... 
-		
 		LD		A,(CONDITIONAL)
 		OR		A
 		JR		NZ,CONDITIONAL_MARKER		; Mark as conditional.
@@ -955,7 +920,6 @@ CONDITIONAL_MARKER:
 		LD		A,'-'
 		CALL	PRINTCHAR
 		RET
-		
 		
 PRNRESET:									;RESET BUFFER.
 		XOR		A
@@ -1494,7 +1458,7 @@ TEST_MACRO:								; This is the MACRO command. NOT a macro.
 		LD		(MACRO_BYTES),HL		; Clear the counter. 		
 		
 ;		LD		A,$FF					; OK, this is bizarre. We're not in the macro mode, but IN-MACRO is only showing up here, despite being elsewhere, and it's not supposed to be here.										; I think the NOTEPAD search is broken. 
-;		LD		(IN_MACRO),A			; turn on Macro mode.  We will now write the label. 
+;		LD		(IN-MACRO),A			; turn on Macro mode.  We will now write the label. 
 ;										; I see the bug. It's IN MINUS MACRO. I need to figure out what this equates to and what value it's changing randomly and why the assembler doesn't catch it. 
 										
 		CALL	MACRO_LOOP				; Read in and store the macro
@@ -1599,7 +1563,7 @@ MACRO_LOOP_1:							; Now we read to the end of the line, or the next operator..
 		CALL	NO_TRANSLATE_TO_END			; Read until the end, or an operator, whichever comes first. But don't translate IX or IY to HL. 
 										; No need to check for MEND. It must ALWAYS be on a new line. 
 		
-		CALL	MACRO_STORE				; Store the word.
+		CALL	MACRO_STORE			
 		
 		LD		A,(EOL)					; Did we get an EOL? We will still count lines, but we need to know if we got an EOL before we clear it. 
 		OR		A
@@ -1768,10 +1732,16 @@ TEST_INCLD:
 		
 		CALL	RECURSIVE_PASS			; Call a recursive pass. Open another source file as though it's the current one but keep everything else the same. 
 
-		LD		A,(INCLUDE)				; Step down include level post-recursion. 
+		LD		A,(INCLUDE)
 		DEC		A
 		LD		(INCLUDE),A
-		
+
+
+;				LD		HL,$0050
+;				LD		DE,$00FF
+;				LD		BC,$AA55				; Signal to emulator to display hex from HL to DE
+;				HALT		
+	
 
 		POP		HL						; And kill the return address and return to the one before that. 
 		RET
@@ -2144,10 +2114,10 @@ GETFILENAME_LOOP:
 		
 GETFILENAME_DONE:
 										; If we don't do anything here, we can kill it at the JR and make it RET NZ
+										
+		CALL	TEST_LABEL_MACROARG				; Can we just look for arguments here?
 
-		CP		'+'						; plus is a special case - ie, Binary - There are no macroarguments for binary files.
-		RET		Z
-		CALL	TEST_LABEL_MACROARG				; Can we just look for arguments here?							
+										
 		RET
 
 GETFILENAME_SEPARATOR:					; We got a "."
@@ -2424,13 +2394,9 @@ ARGOPERATOR:	DB	$00					; Temporary Argument Operator.
 		
 GETARG:									; Get any arguments ( comman delimited after currently processed segment ) 
 		LD		A,(EOL)
-		OR		A
-		RET		NZ
-;		XOR		$FF
-;		RET		Z						; Check we're not at EOL already. 
-		LD		A,(SPECIAL_OPERATOR_FOUND) ; Will happen in some circumstances, such as macros.
-		OR		A
-		RET		NZ							; The PIPE break symbol will happen here. 
+		XOR		$FF
+		RET		Z						; Check we're not at EOL already. 
+				
 		
 		CALL	GETWORD_TO_END			; Get the argument to the end of the line. 
 		
@@ -4969,10 +4935,7 @@ READ_TO_EOL:	DB	$00						; Read through to the end of line - eg, We want to read
 NO_TRANSLATE_TO_END:						; Like getword to end but doesn't translate any IX/IY data... For Macro's only... Otherwise when played back they will just use Getword.
 				LD		A,$FF
 				LD		(READ_TO_EOL),A		; We want the rest of the argument. 
-				LD		(NOTRANSLATE),A		; Mark NO TRANSLATION - eg, Don't expand quotes.
 				CALL	GETWORD
-				XOR		A
-				LD		(NOTRANSLATE),A		; Clear translation flag. 
 				RET
 
 GETWORD_TO_END:								; Same as GETWORD, but ignores ALL WHITE SPACE until either an operator or EOL is encountered. 
@@ -5015,7 +4978,7 @@ QUOTE_ERR:
 INSTRING:			DB	$00					; If not zero, we're in a string. 
 											; It is either ' or " depending on which string started it. 
 ONE_STEP:			DB	$00					; One step ahead... The last / next read character... We need a little bit of a peek ahead. 
-NOTRANSLATE:		DB	$00					; Flag - if not zero, don't translate critical elements. Copy them verbatim (eg, quotes).														
+														
 											
 											; Routine to get the next word from the source... Either a command, the opcode or function and the value. 
 											; Routine to get the next word from the source... Either a command, the opcode or function and the value. 
@@ -5032,46 +4995,21 @@ GETWORD:									; DON'T CALL DIRECTLY. Either call GETWORD_TO_WS (whitespace) o
 GETWORD_NO_OPERATOR:							; No previous operator encountered so get the next word from the file. 	
 
 GETWORD_LOOP:								; Let's loop until we find something of interest. 
-; First test if we are reading a string (quoted) or body content from the source file. 
+
 				LD		A,(INSTRING)			; Are we in a string?
 				OR		A
 				JR		Z,GETWORD_BAU		; In a string, we feed it a byte at a time with literals and commas between entries. Otherwise we scan for Business As Usual. 
-
-				LD		A,(NOTRANSLATE)
-				OR		A
-				JR		Z,GETWORD_EXPAND	; If we're not in translate mode, just expand the quotes.
-
-GETWORD_VERBATIM:							; Just copy the quotes verbatim.
-				CALL	GETCHAR				; Get the character
-				PUSH	AF
-				CALL	GETWORD_ADDCHAR		; Add it to the buffer.
-				POP		AF
-				CP		$0D					; Check for EOL or EOF in a string - These should never occur. 
-				JR		Z,QUOTE_ERR			; No EOL in a quote. anything else other than EOF is OK.
-				CP		26					; No End Of File either. 
-				JR		Z,QUOTE_ERR			; Both will cause an error. 	
-				LD		HL,INSTRING
-				CP		(HL)
-				JR		NZ,GETWORD_VERBATIM
-				LD		A,' '
-				CALL	GETWORD_ADDCHAR		; Finish post-quote with a space... ( It's important to filenames ). 
-				XOR		A
-				LD		(INSTRING),A		; And close it out. 
-				JR		GETWORD_BAU			; And exit back to the main routine when we're done. 
-
-GETWORD_EXPAND:								; Here's where we expand the quotes.				
+				
 				LD		A,(ONE_STEP)		; Get the character we want to process - In a slight lag so we can see when the list is going to end. 
 				PUSH	AF
-				CALL	GETCHAR				; Get the next character. Always look one step ahead with quotes. 
+				CALL	GETCHAR				; Get the next character. 
 				LD		(ONE_STEP),A		; And load the next character in so we know when it's going to come to an end. Also affects the operator we fake. 
-				POP		AF					; And recover the character we originally had to deal with. 
+				POP		AF					; And recover the character from 
 				
-; Character we want is in A, Next character is in (One_Step) ie, One step ahead.
-			
-				CP		$0D					; Check for EOL or EOF in a string - These should never occur. 
+				CP		$0D					; EOL.
 				JR		Z,QUOTE_ERR			; No EOL in a quote. anything else other than EOF is OK.
 				CP		26					; No End Of File either. 
-				JR		Z,QUOTE_ERR			; Both will cause an error. 
+				JR		Z,QUOTE_ERR
 				
 				LD		HL,BUFFER			; Rewrite the buffer with single bytes separated by a comma. 
 				LD		(HL),$02			; 2 bytes of data.
@@ -5084,17 +5022,16 @@ GETWORD_EXPAND:								; Here's where we expand the quotes.
 
 				LD		A,','				; And add a separator.
 				LD		(OPERATOR),A		; to the operator.
-			
-				LD		A,(ONE_STEP)		; Check the look-ahead for a closing quote. 
+				
+				LD		A,(ONE_STEP)
 				LD		HL,INSTRING	
 				CP		(HL)				; And compare the next byte to the terminating character to look ahead ( will be ' or " )
 				RET		NZ					; And return if it's not the terminator.
+				
+				XOR		A					; Clear the operator. If it's encountered next, it will set it, otherwise not. 
+				LD		(OPERATOR),A		; And save it. 	
+				LD		(INSTRING),A		; And clear the INSTRING - We no longer are in a string. 				
 
-GetWord_Outstring: 							; Let's just carry on to BAU - If this works, and nothing else is needed, drop through.
-				XOR		A
-				LD		(INSTRING),A		; And ignore any further string information - Back to Business As Usual.... 
-				LD		(OPERATOR),A		; And delete the assumed "operator" and fall through. 
-											
 GETWORD_BAU:								; If not in a string, it's Business As Usual.				
 	IFNZ	DEBUG
 	CALL PRINTDOT	; Print a dot for each character we are about to get. 
@@ -5128,7 +5065,7 @@ GETWORD_BAU:								; If not in a string, it's Business As Usual.
 
 GetWord_Not_Literal:	
 				CP		'.'					; Special character... We just IGNORE all DOTs as though they don't exist... Just read past them.
-				JP		Z,GETWORD_LOOP		; Redo from top if it was a '.'	
+				JR		Z,GETWORD_LOOP		; Redo from top if it was a '.'	
 
 				CP		';'					; Is a comment?
 				CALL	Z,GETWORD_SKIPCOMMENT	; Skip comments. We will skip to EOL of we hit this, regardless of other symbols. We will end up with the first EOL returned. 
@@ -5142,9 +5079,6 @@ GetWord_Not_Literal:
 				JP		Z,GETWORD_EOL		; Same for CR... EOL is just more whitespace. 
 				CP		26
 				JP		Z,GETWORD_EOL
-
-;				CP		'|'					; Defacto End Of Line, without setting EOL.
-;				RET		Z
 				
 				CALL	GETWORD_OPERATORS	; Check for operators. Will return A as 0 and the zero flag is set if it finds an operator
 											; Then loads the operator it found into the (OPERATOR) variable. Operator doesn't return if it finds an operator. It pops then returns
@@ -5157,7 +5091,7 @@ SKIPCHECKS:	; we probably got a literal character if we just jumped here (eg, & 
 ; Eliminate whitespace at the start.
 				LD		A,(BUFFER)			; Have we received any characters in the buffer yet????
 				OR		A
-				JP		Z,GETWORD_LOOP		; If it's the first to put in the buffer ( zero characters ) then continue to loop - ie, Always ignore whitespace before we have a character.
+				JR		Z,GETWORD_LOOP		; If it's the first to put in the buffer ( zero characters ) then continue to loop - ie, Always ignore whitespace before we have a character.
 				
 				LD		A,(READ_TO_EOL)		; Were we told to ignore Whitespace until Operator or EOL? ( or special operator ).
 				OR		A
@@ -5169,27 +5103,14 @@ SKIPCHECKS:	; we probably got a literal character if we just jumped here (eg, & 
 
 ; This is where we check for things GETWORD picked up....
 GETWORD_QUOTE:		
-GETWORD_QUOTE2:								; Scan the whole string until we get another single quote '
-				LD		(INSTRING),A		; Identify that we're in a string at present.  Store the type of Quote as a character.
-
-				LD		A,(NOTRANSLATE)
-				OR		A
-				JR		Z,GETWORD_QUOTE3
-				LD		A,(INSTRING)
-				CALL	GETWORD_ADDCHAR		; If we're in notranslate mode, just store the byte. 
-				JP		GETWORD_LOOP
-GETWORD_QUOTE3:
-;				CALL	GETWORD				; Get one word ahead of where we are. 
-				CALL	GETCHAR				; WHOA - It was supposed to be a single character, not a recursive word !!! Big bug. 
+GETWORD_QUOTE2:						; Scan the whole string until we get another single quote '
+				LD		(INSTRING),A		; Store the quote so we know what to terminate it with.
+				CALL	GETWORD
 				LD		(ONE_STEP),A		; Store this for the next step.
-				LD		HL,INSTRING			; We need to check for a sudden null string here... 
-				CP		(HL)				; Need to check in case we get something like "" rather than "chars"
-; Note - I may have to check that the buffer is empty before I do this... And error out if it's not empty (Eg WORD"QUOTED" is bad )
+				LD		HL,INSTRING
+				CP		(HL)
 				JP		NZ,GETWORD_LOOP		; And restart the loop.
-											; Or fall through and fix.
-				XOR		A					; So we're back out of the loop already. 
-				LD		(INSTRING),A
-				JP		GETWORD_LOOP		
+											; Or fall through and error. 					
 
 GETWORD_CHAR:								; Now we know we got legitimate characters. Store them.
 				CP		$61					; a? First we make ALL CAPS... 
@@ -5245,9 +5166,13 @@ GETWORD_OPERATORS_LOOP:
 				CP		(HL)
 				JR		Z,GETWORD_CLEARSPECIAL	; End but clear the special operator also.  This is critical for things like (IX+DISP) and IN (C) IN (VALUE)
 				CP		'|'						; Symbol for separating commands. Like an EOL without a new line.
-				RET		NZ						; Return here, no operators found. 			
+				JR		Z,GETWORD_CLEARSPECIAL	; Same as a special character. Ends the input search, but doesn't record the character and doesn't cause an EOL. 
+				RET									; Return with no operators found. 
 ; Below it drops out of the call and forces a return via a POP and a RET. 
-; And exit the entire Getwork routine. 
+GETWORD_OPERATORS_FOUND:
+				LD		(OPERATOR),A				; Note we found an operator. 
+				POP		HL					; Waste the return address
+				RET							; And exit the entire Getwork routine. 
 GETWORD_CLEARSPECIAL:
 				LD		(HL),$00			; Clear the special operator... It's a single trigger.
 				LD		HL,SPECIAL_OPERATOR_FOUND
@@ -5256,10 +5181,6 @@ GETWORD_CLEARSPECIAL_NORECORD:				; Later Entrypoint - Don't note that we found 
 				POP		HL					; Waste the return address
 				RET							; And exit before we do anything further. 
 
-GETWORD_OPERATORS_FOUND:
-				LD		(OPERATOR),A				; Note we found an operator. 
-				POP		HL					; Waste the return address
-				RET		
 
 GETWORD_SKIPCOMMENT:				
 				CALL	GETCHAR
@@ -5277,8 +5198,7 @@ GETWORD_EOL:								; Called for EOL or EOF.
 				LD		(EOL),A						; Mark that we actually hit an EOL. 
 				RET									; and return to software, exiting the GETWORD LOOP.   
 													; We count EOL for software debugging and error purposes. 
-								
-	
+
 
 
 ; ################ Translation details ( Sometimes we see IX or IY instead of HL ).
@@ -6303,9 +6223,6 @@ INTEL_EOF:
 		CALL	BYTE_TO_FILE
 		LD		A,$0A
 		CALL	BYTE_TO_FILE
-		
-		LD		A,$1A
-		CALL	BYTE_TO_FILE			; And write an EOF here... 
 		RET
 		
 ; We ignore : and the New Line. We can add those manually since they are bytes, not HEX.
@@ -6745,10 +6662,10 @@ END_OF_PROGRAM:						; Anything past this point is undefined data - either syste
 CSUM:			DB		$00			; Byte for summing intel hex format output.
 HEXCOUNT:		DB		$00			; How many bytes should we install per line? ( We will begin with the PC whatever it is. )
 INTELFORMAT:	DB		$00			; If not zero, output in INTEL FORMAT
-;PRNOUT:			DB		$00			; PRN Format. Print bytes,line that generated it. 
+PRNOUT:			DB		$00			; PRN Format. Print bytes,line that generated it. 
 PRNLOC:			DW 		$0000		; 2 byte location we were writing to. 	
-;PRNCHARS:		DB		$00			; Number of characters from source in PRN file output. (line length limit )  - moved to system variables.
-;PRNCODE:		DB 		$00,$00,$00,$00	; 4 bytes of possible instructions. - Moved to system variables. 
+PRNCHARS:		DB		$00			; Number of characters from source in PRN file output. (line length limit ) 
+;PRNCODE:		DB 		$00,$00,$00,$00	; 4 bytes of possible instructions.
 ;PRNENDCODE:							; So we're clear on where it ends.
 ;PRNLEN:			DB 		$00			; The length of the instruction ( in bytes ) - 0 is OK too.
 ;PRNBUFPTR:		DB 		$00			; Buffer pointer. 
@@ -7012,19 +6929,11 @@ LABEL_USER:		DW		MACRO_NEST	; Final link to the User Label Table.
 VARG9:	DW		$0009	; No value.		
 		
 MACRO_NEST:
-		DW		PRN_DEBUG
+		DW		LABEL_TABLE_USER
 		DB		5
 		DB		'XNEST'
 IN_MACRO:	DB	$00				; Macro nesting level.
-UNUSED1:	DB	$00					; Spare, but PC version needs to change nesting depth from 16 to 8 bits to use.
-
-PRN_DEBUG:							; Debugging and PRN output set within CODE - not by switches. 
-		DW		LABEL_TABLE_USER
-		DB		6
-		DB		'XDEBUG'
-PRNOUT:			DB		$00			; PRN Format. Print bytes,line that generated it. 
-PRNCHARS:		DB		$00			; Number of characters from source in PRN file output. (line length limit ) Should be less than the buffer which is 64 bytes. Rec 32 bytes.
-
+UNSET:	DB	$00
 									; And set where the non-system labels will go.
 LABEL_TABLE_USER:	DB	$00,$00		;'This is the user label table start 
 
