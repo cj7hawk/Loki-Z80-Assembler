@@ -23,6 +23,8 @@ REM Token Analysis - Not Started.
 REM
 REM BUGS TO FIX.
 REM 1. Closing group that points to end of table causes crash and table corruption (eg Group ends at end of table ). 
+REM 2. Include without .END instruction locks up before returning down a level.
+
 
 
 dim shared ASMFILENAME as string 		: rem Incoming Assembly File NAME
@@ -2127,7 +2129,7 @@ rem Check Opcode values for 8 bits.
 		build=build+left(operand,2)
 	Endif
 
-	if VALUE<>0 and pass(0)=2 then	PRNOUTPUT(build) : rem Normal /P = Pass 2
+	if Label8(XDEBUG)>0 and pass(0)=2 then	PRNOUTPUT(build) : rem Normal /P = Pass 2
 	if LABEL8(XDEBUG)=2 and pass(0)=1 then PRNOUTPUT(build) : rem /O both passes - rem was PRNFORMAT instead of Label8
 	
 	rem Sanity check... do we actually have anything to write, or is it a wasted write?

@@ -81,9 +81,6 @@ arithmetic:
 ;  BUG - MINOR The code count picks up the "next" PC as the last, so overestimates by one. 
 ;  FIXED - Bug on recursion Include, the default ORG gets set, but the default should be the PC at the time the INCLUDE was called. 
 ;  ADDED - Ability to set PRNOUT from 00 to 01 or 02 within the code by moving it to system variables... Useful if you just want PRN for a few lines. 
-; 28/05/2025
-;  FIXED - Bug that didn't set PC_OFFSET before each pass, and also didn't recalculate XWLOC ( write location ) in the write routines, just after the DRY_WRITE label (wet and dry both use code)
-;  ISSUE - ORG doesn't necessarily show on Z80 version during instruction on PRN output, but on the next instruction, but is shown on the PC Cross-assembler. Not a bug. 
 
 EQU	DEBUG,$00
 
@@ -150,8 +147,6 @@ OPEN_ASSEMBLY:
 				CALL	OUTPUT_RESET	; Reset(SET) the counters for the output file before Pass 1 starts.
 				LD		HL,$0100
 				LD		(PC),HL		; Default PC is $0100.  OMG, I had ,A here for so long... Never noticed.
-				LD		HL,$0000
-				LD		(PC_OFFSET),HL		; And clear offset. 
 
 				CALL	MAKE_PASS		; Use the default input file for the first pass.
 
@@ -160,9 +155,6 @@ OPEN_ASSEMBLY:
 				LD		(PASS),A		; And the local pass number. 
 				LD		HL,$0100
 				LD		(PC),HL		; Default PC is $0100.  OMG, I had ,A here for so long... Never noticed.			
-				LD		HL,$0000
-				LD		(PC_OFFSET),HL	; Clear offset. 
-			
 				CALL	MAKE_PASS		; And make the second pass - call separately as we want to change GPASS ( Global Pass ) variable.
 
 				LD		A,(INTELFORMAT)
@@ -217,7 +209,6 @@ MAKE_2_PASSES:									; A module has been included, will usually be ONE pass un
 				LD		(PASS),A		; But if we're going to make a second pass, make sure it's pass 2. 
 				LD		HL,(PC_STORE)	; Recover the PC from the start. 
 				LD		(PC),HL			; And let's also make sure it starts with the same PC, since we've done it once already.
-				
 				CALL	MAKE_PASS		; And make a second pass !
 										; Technically, even a second pass can request two passes again.... But mostly this would be 
 				RET						; the first pass where the second pass happens. 
@@ -6133,23 +6124,12 @@ LAST_ADDRESS:	DW	$0000				; Last address - If we go up by more than 1, we need t
 WRITE_BYTE_STORE:	DB	$00				; Temp store for the byte we're writing.
 ;WRITE_ADDR_STORE:	DW	$0000			; Temp store for the location we want to write to.
 										; Fall through for the second. 
-										
-UPDATEXWLOC:								; Update write location.
+WRITEBYTE:
 		LD		HL,(PC)
 		LD		DE,(PC_OFFSET)			; We can write to a different location.
 		ADD		HL,DE					; ADD them.
 		LD		(WRITE_ADDR_STORE),HL	; Store the location we want to write to.
 		LD		(WRITE_BYTE_STORE),A		; Store the byte we want to write to that location. 
-		RET
-		
-WRITEBYTE:
-;		LD		HL,(PC)
-;		LD		DE,(PC_OFFSET)			; We can write to a different location.
-;		ADD		HL,DE					; ADD them.
-;		LD		(WRITE_ADDR_STORE),HL	; Store the location we want to write to.
-;		LD		(WRITE_BYTE_STORE),A		; Store the byte we want to write to that location. 
-
-CALL	UPDATEXWLOC						; Make sure we know where we're writing to in memory. 
 
 ;LD	(HL),A 	  							; TEST. Don't write during Pass1 and don't write direct to memory unless switch is on. 
 
@@ -6184,10 +6164,10 @@ WRITE_BYTE_FORCE_WET:						; Might jump here if the code requires a forced write
 
 
 DRY_WRITE:								; In case we didn't really write it.
+
 		LD		HL,(PC)					; Now step PC forward
 		INC		HL
 		LD		(PC),HL					; And store the byte since it's a list. 
-		CALL	UPDATEXWLOC				; Update the write location since we changed the PC. 
 		CALL	CHECKPC					; Make sure we didn't wrap at FFFF			
 IFNZ	DEBUG
 		CALL	WRITEBYTE_SHOWBYTE
