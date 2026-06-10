@@ -1,8 +1,8 @@
-; z80 Assembler - To work and assemble z80 code within the LOKI environment. 
-; Current version - 00.94 BETA
-; 
+arithmetic:
+;z80 Assembler - To work and assemble z80 code within the LOKI environment. 
+;
 ; Note currently trying to evaluate - And process multiple same operators - eg, 123<<<<
-; 
+;
 ;
 ; Stuff to do 
 ; If pass=2 and a label does not exist, ERROR OUT. - eg, JP (UU) will look like a 4 character label, and is valid, but if no (UU): or EQU (UU) then it's NOT valid even though it eval's to nothing. 
@@ -84,17 +84,10 @@
 ; 28/05/2025
 ;  FIXED - Bug that didn't set PC_OFFSET before each pass, and also didn't recalculate XWLOC ( write location ) in the write routines, just after the DRY_WRITE label (wet and dry both use code)
 ;  ISSUE - ORG doesn't necessarily show on Z80 version during instruction on PRN output, but on the next instruction, but is shown on the PC Cross-assembler. Not a bug. 
-; 9/6/2026 
-;  Added the version number to system variables and print this during pass2 of the ASSEMBLE.ASM file assembly. 
-
-; Show the4 version number 
-ifz XPASS-$0202 ; note - this works as ifz XPASS=$0202 - which I didn't code. Look into why that is happening. 
-	MSG LOKI_ASSEMBLER_VERSION_ | SHEX XVERSION | SCR ; Show the text LOKI_ASSEMBLER_VERSION_XXXX - Which is the HEX BCD of the Version XX.XX
-endif
-
-; Main code starts here. 
 
 EQU	DEBUG,$00
+
+
 
 ;System Constants.
 .EQU	BDOS0005,$0005
@@ -7046,18 +7039,13 @@ IN_MACRO:	DB	$00				; Macro nesting level.
 UNUSED1:	DB	$00					; Spare, but PC version needs to change nesting depth from 16 to 8 bits to use.
 
 PRN_DEBUG:							; Debugging and PRN output set within CODE - not by switches. 
-		DW		VERSION
+		DW		LABEL_TABLE_USER
 		DB		6
 		DB		'XDEBUG'
 PRNOUT:			DB		$00			; PRN Format. Print bytes,line that generated it. 
 PRNCHARS:		DB		$00			; Number of characters from source in PRN file output. (line length limit ) Should be less than the buffer which is 64 bytes. Rec 32 bytes.
 
-VERSION:							; Let's store the version number of the assembler here... We *can* change it from the source, but we can access it too.
-		DW		LABEL_TABLE_USER
-		DB		8
-		DB		'XVERSION'		; And set where the non-system labels will go. XVERSION holds this information. 
-ASMVER:	DB		$00,$94			; Current version is 00.94 - Late Alpha... This feature went in, in version 00.94 in June 2026. 
-
+									; And set where the non-system labels will go.
 LABEL_TABLE_USER:	DB	$00,$00		;'This is the user label table start 
 
 	
