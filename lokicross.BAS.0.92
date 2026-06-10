@@ -24,26 +24,6 @@ REM
 REM BUGS TO FIX.
 REM 1. Closing group that points to end of table causes crash and table corruption (eg Group ends at end of table ). 
 REM 2. Include without .END instruction locks up before returning down a level.
-REM 25/07/2025 - Issue with LD A,(IX) - which assembles, but is WRONG. Needs to be LD A,(IX+d) format... Otherwise the first byte of the next instruction is taken as the displacement. 
-rem     - ref : From PRN: 	Gp:0202 Lv:00 Ln:02353 0795 0795  DD7E                     LD A,(IX)
-rem 						Gp:0202 Lv:00 Ln:02354 0797 0797  D5                     PUSH DE
-rem             From Debug: C:0795 DD 7E D5       xxIXxx          EX:01798 PC:0798 : AF:6814 BC:004B DE:0011 HL:0083 Stack:CFF2 Flags:--xHxP--  AF':FFFF BC':1721 DE':0000 HL':CFFF IX:5D00 IY:5C3A (HL)0065 (00A1)4E,564D65
-rem 	FIXED 28/072025
-rem
-rem
-rem
-rem - DIRTAP error - The CA:: JUMPLOC ASSEMBLES - SHOULD ERROR. Examine why.... 
-rem 27 3AAD 3AAD  #                     DIRTAP:
-rem  Gp:0202 Lv:00 Ln:17727 3AAD 3AAD  #                     ; Directory of the loaded TAP. We wi
-rem  Gp:0202 Lv:00 Ln:17728 3AAD 3AAD  #                     CA:
-rem  Gp:0202 Lv:00 Ln:17728 3AAD 3AAD  #                     :
-rem  Gp:0202 Lv:01 Ln:00001 3AAD 3AAD  #                     RESET_FILE
-rem  Gp:0202 Lv:01 Ln:00002 3AAD 3AAD  #                     
-rem
-rem WHAT THE CODE LOOKS LIKE.... 
-rem DIRTAP:							; Directory of the loaded TAP. We will need to recursively or randomly load the TAP and read the filenames. 
-rem		CA::	RESET_FILE
-
 
 
 
@@ -158,7 +138,6 @@ dim shared ARG8 as integer
 dim shared ARG9 as integer
 dim shared XNEST as integer 
 dim shared XDEBUG as integer : rem PRN output. Lower = flags, Upper = characters to show.
-dim shared XVERSION as integer : rem Version of assembler. 
 
 rem dim shared pass as integer : rem Store from XPASS.
 rem dim shared gpass as integer : rem Global Pass.
@@ -183,7 +162,7 @@ DIM SHARED TWO_PASS_ORG as integer : rem temp store for ORG for 2pass.
 DIM SHARED SFILENAME as string : rem get the filename specified in source in "filename.ext" format. 
 DIM SHARED BINFILE as string : rem Something for Binary files.
 DIM SHARED BINSIZE as integer : rem Count of bytes we will transfer, since CP/M isn't sure about file size. 
-DIM SHARED GOTJUMP as integer : rem Flag to identify to GETWORDTOEND that we are in a JUMP command as it affects opcode translation. 
+
 
 DIM SHARED OUTFILE as integer : rem The port for the file output. 
 
@@ -1104,9 +1083,7 @@ rem Set Special functions here - eg, Flags to change operation.
 	result=Getword(textin)
 	if result="(HL)" and PREFIX1 <> "" then
 	rem We do this if it's clearly (IX, (IX), (IY or (IY) 
-		
 		if op="-" or op="+" then
-			if gotjump=1 then logerror ("Should not be displacement after JP(IX) or JP(IY)")
 			Special_Operator=")" : rem ADD ) to operator list. 
 			displace=EVAL(""): rem Send starting "" to EVAL to start as "0" - eg, 0+ or 0-
 			if displace<-128 or displace>127 then logerror ("Index Usage Invalid. -128..127 only")
@@ -1119,10 +1096,10 @@ rem Set Special functions here - eg, Flags to change operation.
 			DontIgnoreEol=1 : rem There MIGHT be a comma, or there MIGHT me an EOL or who knows what ? Don't search past EOL. 
 			tempcomma=getword(source) : rem Just to clear out the comma we know will follow ( and we can check it )
 									: rem It will still set OP to "," if all is OK. 
-			if opcode = chr(&h0E9) then logerror ("Displacement not expected after JP (IX/IY)")
-		else
-			if GOTJUMP =0 then logerror ("Displacement is not present after index.") : rem Should be a -d or +d command. 
-		endif	
+rem		else
+rem			LogError ("Index Usage Invalid")
+rem Used to identify exceptions here, but now accept both forms of (IX) with and without an index. 
+		endif
 	endif
 	
 return result
@@ -1336,7 +1313,6 @@ rem	Print "XSYSTEM Added"
 	ADDLABEL ("ARG9",&h0009)	: rem 
 	ADDLABEL ("XNEST",&h0000)	: rem 
 	ADDLABEL ("XDEBUG",&h0000)	: rem PRN output control. 
-	ADDLABEL ("XVERSION",&h0094): rem Version number - Alpha 00.94
 
 rem Get system variable locations in table for "Fast Access" even if they are turned off. 
 		ORGPC=GETLABEL("ORGPC")+3+len("ORGPC") : rem Locate the label value directly for system variables. 
@@ -1357,7 +1333,6 @@ rem		LBASE=GETLABEL("LBASE")+3+len("LBASE") : rem Locate the label value directl
 		ARG9=GETLABEL("ARG9")+3+len("ARG9") : rem Locate the label value directly for system variables.
 		XNEST=GETLABEL("XNEST")+3+len("XNEST") : rem Locate the label value directly for system variables. 
 		XDEBUG=GETLABEL("XDEBUG")+3+len("XDEBUG") : rem Locate the label for the system. 
-		XVERSION=GETLABEL("XVERSION")+3+len("XVERSION") : rem Locate the label for XVERSION - So we can see the version number from the code. 
 		
 	
 	rem User labels start here - Set marker for XSYSTEM so it can be turned on and off.
@@ -1456,10 +1431,8 @@ if op<>"" then logerror("Numerical operator encountered or other unrecognized sy
 End Sub
 
 Sub Test_JP
-gotjump=1 : rem Notify getwordtoend we got a jump, since it's relvant to syntax parsing. 
 PART1=getwordtoend(SOURCE)  
 rem Print "Part1:";PART1
-gotjump=0 
 
 select case PART1
 rem Look for a condition - eg, Z NZ, C, NZ.
